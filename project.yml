@@ -1,0 +1,95 @@
+name: Clak
+options:
+  bundleIdPrefix: com.clak
+  deploymentTarget:
+    macOS: "14.0"
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ENABLE_HARDENED_RUNTIME: true
+    # Local builds stay Automatic; scripts/release.sh overrides with
+    # Developer ID manual signing for distribution
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  Clak:
+    type: application
+    platform: macOS
+    sources:
+      - path: Clak
+        excludes:
+          - "**/.DS_Store"
+    resources:
+      - path: Clak/Resources/Assets.xcassets
+      - path: Clak/Scripting/Clak.sdef
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clak.app
+        PRODUCT_NAME: Clak
+        INFOPLIST_FILE: Clak/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Clak/Clak.entitlements
+        GENERATE_INFOPLIST_FILE: false
+        COMBINE_HIDPI_IMAGES: true
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        ENABLE_APP_SANDBOX: false
+        SWIFT_EMIT_LOC_STRINGS: true
+        SWIFT_OBJC_BRIDGING_HEADER: Clak/Clak-Bridging-Header.h
+    dependencies:
+      - framework: IOBluetooth.framework
+        embed: false
+      - framework: CoreBluetooth.framework
+        embed: false
+    postBuildScripts:
+      - name: Sync VERSION into Info.plist
+        script: |
+          VERSION=$(tr -d '[:space:]' < "${SRCROOT}/VERSION")
+          PLIST="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" "${PLIST}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION}" "${PLIST}"
+        basedOnDependencyAnalysis: false
+
+  ClakRemote:
+    type: application
+    platform: iOS
+    sources:
+      - path: ClakRemote
+        excludes:
+          - "**/.DS_Store"
+      - path: Clak/Bluetooth/BLEHIDPeripheralManager.swift
+      - path: Clak/Keyboard/KeyCodeTranslator.swift
+      - path: Clak/Utilities/Logger.swift
+      - path: Clak/Utilities/Constants.swift
+      - path: Clak/Utilities/ObjCExceptionCatcher.h
+      - path: Clak/Utilities/ObjCExceptionCatcher.m
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clak.remote
+        PRODUCT_NAME: ClakRemote
+        INFOPLIST_FILE: ClakRemote/Info.plist
+        GENERATE_INFOPLIST_FILE: false
+        SWIFT_OBJC_BRIDGING_HEADER: ClakRemote/ClakRemote-Bridging-Header.h
+        TARGETED_DEVICE_FAMILY: "1,2"
+        DEVELOPMENT_TEAM: CL6XWJCS9R
+        SWIFT_EMIT_LOC_STRINGS: true
+    dependencies:
+      - framework: CoreBluetooth.framework
+        embed: false
+
+  ClakTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: ClakTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clak.app.tests
+        GENERATE_INFOPLIST_FILE: true
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Clak.app/Contents/MacOS/Clak"
+    dependencies:
+      - target: Clak

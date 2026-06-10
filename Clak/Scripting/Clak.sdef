@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<dictionary title="Clak Terminology">
+    <suite name="Clak Suite" code="T2Ph" description="Clak scripting commands.">
+        <command name="type text" code="T2Phtype" description="Type text on the connected device.">
+            <direct-parameter type="text" description="The text to type."/>
+        </command>
+        <command name="connect" code="T2Phconn" description="Start advertising and connect to a device."/>
+        <command name="disconnect" code="T2Phdisc" description="Disconnect from the current device."/>
+    </suite>
+</dictionary>
