@@ -1,6 +1,10 @@
 import Cocoa
 
 final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDelegate {
+    /// With @NSApplicationDelegateAdaptor, NSApp.delegate is SwiftUI's wrapper,
+    /// so scripting commands reach the real delegate through this instead.
+    private(set) static weak var shared: AppDelegate?
+
     let appState = AppState()
     let bluetoothManager = BluetoothManager()
     private let keyboardCapture = KeyboardEventCapture()
@@ -20,6 +24,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
     private var isCorrectingPosition = false
 
     // MARK: - Application Lifecycle
+
+    override init() {
+        super.init()
+        AppDelegate.shared = self
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.app.info("Clak launching")
@@ -92,9 +101,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
             ScrollEnhancer.shared.start()
         }
 
-        // Suppress system beep by consuming key events at the app level
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { _ in
-            return nil  // Swallow all key events — they're handled by the CGEventTap
+        // Suppress the system beep by consuming key events at the app level,
+        // but only while keys are actually being forwarded by the CGEventTap —
+        // returning nil here starves every later-installed local monitor (the
+        // shortcut recorder) and all AppKit key handling (Cmd+Q, Cmd+,).
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+            guard let self,
+                  self.appState.isForwarding,
+                  self.appState.isConnected,
+                  !self.isRecordingShortcut else {
+                return event
+            }
+            return nil
         }
 
         Log.app.info("Clak launch complete")
@@ -322,10 +340,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
             && keyboardCapture.isConsumeCapable
     }
 
+    /// True while a recorder in the Shortcuts tab owns the keyboard. Gated on
+    /// isAppActive so a recorder left open doesn't stall global forwarding —
+    /// its local monitor only receives events while the app is frontmost.
+    private var isRecordingShortcut: Bool {
+        isAppActive && shortcutManager.isRecording
+    }
+
     func keyboardCapture(_ capture: KeyboardEventCapture, didCaptureKeyDown keyCode: UInt16, modifiers: CGEventFlags, isAutorepeat: Bool) -> Bool {
         let modifierByte = modifierTracker.update(with: modifiers)
 
         guard isAppActive || appState.isGlobalForwarding, appState.isConnected else {
+            return false
+        }
+
+        // While recording, keys belong to the recorder's monitor — don't
+        // match shortcuts (a colliding chord would fire its action) or forward
+        if isRecordingShortcut {
             return false
         }
 
@@ -390,7 +421,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         let modifierByte = modifierTracker.update(with: modifiers)
 
         guard isAppActive || appState.isGlobalForwarding,
-              appState.isForwarding, appState.isConnected else {
+              appState.isForwarding, appState.isConnected,
+              !isRecordingShortcut else {
             return false
         }
 
@@ -401,7 +433,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
 
     func keyboardCapture(_ capture: KeyboardEventCapture, didCaptureModifierChange modifiers: CGEventFlags) -> Bool {
         guard isAppActive || appState.isGlobalForwarding,
-              appState.isForwarding, appState.isConnected else {
+              appState.isForwarding, appState.isConnected,
+              !isRecordingShortcut else {
             // Still track modifiers even when not forwarding so state is correct when we resume
             modifierTracker.update(with: modifiers)
             return false

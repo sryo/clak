@@ -52,6 +52,7 @@ struct ShortcutRecorderView: View {
 
     private func startRecording() {
         conflictMessage = nil
+        KeyboardShortcutManager.shared.isRecording = true
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let keyCode = event.keyCode
             let flags = CGEventFlags(rawValue: UInt64(event.modifierFlags.rawValue))
@@ -82,6 +83,7 @@ struct ShortcutRecorderView: View {
     }
 
     private func stopRecording() {
+        KeyboardShortcutManager.shared.isRecording = false
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil

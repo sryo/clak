@@ -62,6 +62,11 @@ final class KeyboardShortcutManager {
 
     // MARK: - Properties
 
+    /// True while a ShortcutRecorderView is capturing a chord. AppDelegate
+    /// stands down its beep-suppression monitor and event forwarding so the
+    /// recorder's own local monitor receives the keys.
+    var isRecording = false
+
     private var shortcuts: [ShortcutBinding] = []
 
     /// UserDefaults key for persisted shortcut data.

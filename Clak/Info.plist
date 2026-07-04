@@ -24,6 +24,10 @@
 	<string>Clak needs Bluetooth to connect to your iOS devices and act as a wireless keyboard.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>Clak uses Bluetooth to advertise as a keyboard and send keystrokes to your connected devices.</string>
+	<key>NSAppleScriptEnabled</key>
+	<true/>
+	<key>OSAScriptingDefinition</key>
+	<string>Clak.sdef</string>
 	<key>NSMainStoryboardFile</key>
 	<string></string>
 	<key>NSPrincipalClass</key>
