@@ -79,6 +79,13 @@ final class TrackpadUIView: UIView {
         fatalError("init(coder:) is not supported")
     }
 
+    override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        if newWindow == nil {
+            cancelMomentum()
+        }
+    }
+
     // MARK: - Touches
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -114,7 +121,10 @@ final class TrackpadUIView: UIView {
 
         let timestamp = touches.first?.timestamp ?? 0
 
-        if activeTouches.count >= 2 {
+        // Branch on the session max, not the live count: fingers lift
+        // non-simultaneously, so a scroll session must never fall through to
+        // the pointer branch when only the last finger remains.
+        if sessionMaxTouches >= 2 {
             // Natural scrolling: fingers up = content moves up = wheel down
             let dt = max(timestamp - lastScrollTimestamp, 0.004)
             lastScrollTimestamp = timestamp
@@ -178,12 +188,22 @@ final class TrackpadUIView: UIView {
         momentumAccY = 0
         lastMomentumTimestamp = CACurrentMediaTime()
 
-        let link = CADisplayLink(target: self, selector: #selector(momentumTick(_:)))
+        // Weak proxy target: CADisplayLink retains its target, so a direct
+        // `self` would keep a dead view alive and scrolling after removal.
+        let proxy = DisplayLinkProxy()
+        proxy.onTick = { [weak self] link in
+            guard let self else {
+                link.invalidate()
+                return
+            }
+            self.momentumTick(link)
+        }
+        let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
         link.add(to: .main, forMode: .common)
         momentumLink = link
     }
 
-    @objc private func momentumTick(_ link: CADisplayLink) {
+    private func momentumTick(_ link: CADisplayLink) {
         let now = link.timestamp
         let dt = CGFloat(min(now - lastMomentumTimestamp, 0.1))
         lastMomentumTimestamp = now
@@ -248,6 +268,14 @@ final class TrackpadUIView: UIView {
 
     private static func clamp(_ value: CGFloat) -> Int8 {
         Int8(max(-127, min(127, value.rounded())))
+    }
+}
+
+private final class DisplayLinkProxy: NSObject {
+    var onTick: ((CADisplayLink) -> Void)?
+
+    @objc func tick(_ link: CADisplayLink) {
+        onTick?(link)
     }
 }
 
