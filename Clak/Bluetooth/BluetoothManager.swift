@@ -61,13 +61,13 @@ final class BluetoothManager: NSObject, BLEHIDPeripheralDelegate {
         Log.bluetooth.info("BLE torn down completely")
     }
 
-    /// Momentary disconnect + re-advertise. Used by menu "Reconnect".
+    /// Cycle advertising. A BLE peripheral cannot force-disconnect a central,
+    /// so devices that are still subscribed stay connected and stay listed —
+    /// clearing them here would freeze the UI on "Searching…" while the phone
+    /// still shows a live keyboard. This only restarts discovery for new hosts.
     func disconnectAndReAdvertise() {
         blePeripheral.stopAdvertisingOnly()
-        deviceManager.removeAllDevices()
-        connectedDevices = []
-        connectionState = .advertising
-        Log.bluetooth.info("Disconnected, re-advertising")
+        Log.bluetooth.info("Cycling advertising")
 
         // Brief pause then resume
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -180,12 +180,12 @@ final class BluetoothManager: NSObject, BLEHIDPeripheralDelegate {
         }
     }
 
-    func peripheralDidFailWithError(_ message: String) {
-        connectionState = .error(message)
-        Log.bluetooth.error("BLE error: \(message)")
+    func peripheralDidFail(_ failure: BLEHIDPeripheralManager.Failure) {
+        connectionState = .error(failure.message)
+        Log.bluetooth.error("BLE error: \(failure.message)")
 
-        // Don't auto-recover from power-off or unauthorized — those need user/system action
-        guard !message.contains("powered off") && !message.contains("not authorized") else {
+        // Power-off and permission failures need user/system action, not a retry
+        guard failure.isRetryable else {
             return
         }
 

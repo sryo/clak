@@ -61,11 +61,16 @@ targets:
         excludes:
           - "**/.DS_Store"
       - path: Clak/Bluetooth/BLEHIDPeripheralManager.swift
+      - path: Clak/Bluetooth/HIDReportMap.swift
       - path: Clak/Keyboard/KeyCodeTranslator.swift
+      - path: Clak/Keyboard/CharacterComposer.swift
       - path: Clak/Utilities/Logger.swift
       - path: Clak/Utilities/Constants.swift
       - path: Clak/Utilities/ObjCExceptionCatcher.h
       - path: Clak/Utilities/ObjCExceptionCatcher.m
+    resources:
+      - path: ClakRemote/Assets.xcassets
+      - path: ClakRemote/PrivacyInfo.xcprivacy
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.clak.remote
@@ -76,9 +81,18 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         DEVELOPMENT_TEAM: CL6XWJCS9R
         SWIFT_EMIT_LOC_STRINGS: true
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - framework: CoreBluetooth.framework
         embed: false
+    postBuildScripts:
+      - name: Sync VERSION into Info.plist
+        script: |
+          VERSION=$(tr -d '[:space:]' < "${SRCROOT}/VERSION")
+          PLIST="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" "${PLIST}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION}" "${PLIST}"
+        basedOnDependencyAnalysis: false
 
   ClakTests:
     type: bundle.unit-test
@@ -93,3 +107,18 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Clak.app/Contents/MacOS/Clak"
     dependencies:
       - target: Clak
+
+  ClakRemoteTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ClakRemoteTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clak.remote.tests
+        GENERATE_INFOPLIST_FILE: true
+        DEVELOPMENT_TEAM: CL6XWJCS9R
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ClakRemote.app/ClakRemote"
+    dependencies:
+      - target: ClakRemote

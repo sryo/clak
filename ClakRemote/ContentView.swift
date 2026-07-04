@@ -13,6 +13,14 @@ struct ContentView: View {
                 functionRow
                 specialKeysRow
                 bottomRow
+                if controller.droppedCharacterCount > 0 {
+                    Label(
+                        "\(controller.droppedCharacterCount) character\(controller.droppedCharacterCount == 1 ? "" : "s") couldn't be sent — only text typeable on a US-layout keyboard reaches the Mac.",
+                        systemImage: "character.cursor.ibeam"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                }
                 if controller.hardwareKeyboardAttached {
                     Label(
                         "iOS hides the on-screen keyboard while a Bluetooth keyboard is connected to this iPhone — disconnect it (e.g. Clak) in Settings → Bluetooth.",
@@ -65,6 +73,19 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
+            Text("Keep this screen open while pairing — iOS hides “Clak Remote” from the Mac's Bluetooth list while the app is in the background or the phone is locked.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            if controller.bluetoothPermissionDenied {
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            }
         }
     }
 

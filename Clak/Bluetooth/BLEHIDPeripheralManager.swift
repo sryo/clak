@@ -6,9 +6,15 @@ protocol BLEHIDPeripheralDelegate: AnyObject {
     func peripheralDidStopAdvertising()
     func peripheralDidConnect(central: CBCentral)
     func peripheralDidDisconnect(central: CBCentral)
-    func peripheralDidFailWithError(_ message: String)
+    func peripheralDidFail(_ failure: BLEHIDPeripheralManager.Failure)
     func peripheralDidPowerOn()
     func peripheralDidReceiveLEDState(_ ledByte: UInt8)
+    /// The notification queue has drained — queued senders may push more reports.
+    func peripheralIsReadyToSend()
+}
+
+extension BLEHIDPeripheralDelegate {
+    func peripheralIsReadyToSend() {}
 }
 
 /// BLE GATT peripheral implementing HID over GATT Profile (HOGP).
@@ -20,24 +26,47 @@ protocol BLEHIDPeripheralDelegate: AnyObject {
 ///
 /// Exposes three input reports, each on its own characteristic whose Report
 /// Reference descriptor (0x2908) carries the Report ID — per HOGP, notification
-/// payloads EXCLUDE the report ID byte:
-/// - ID 1 Keyboard: [modifiers(1), reserved(1), keycodes(6)] = 8 bytes
-/// - ID 2 Consumer: [usage_lo, usage_hi] = 2 bytes
-/// - ID 3 Mouse:    [buttons, dx, dy, wheel] = 4 bytes
-///                  (+ pan byte when includeHorizontalScroll is set)
+/// payloads EXCLUDE the report ID byte. Report layouts live in HIDReportMap.
 ///
 /// NOTE: After changing the HID descriptor, paired devices must be
 /// "forgotten" and re-paired to pick up the new report map.
 final class BLEHIDPeripheralManager: NSObject {
+
+    enum Failure: Equatable {
+        case poweredOff
+        case unauthorized
+        case unsupported
+        case advertisingFailed(String)
+        case serviceSetupFailed(String)
+
+        var message: String {
+            switch self {
+            case .poweredOff: "Bluetooth is powered off"
+            case .unauthorized: "Bluetooth access not authorized"
+            case .unsupported: "Bluetooth LE is not supported on this hardware"
+            case .advertisingFailed(let reason): "BLE advertising failed: \(reason)"
+            case .serviceSetupFailed(let reason): "BLE service setup failed: \(reason)"
+            }
+        }
+
+        /// Whether retrying can help. Power/permission failures need
+        /// user or system action instead.
+        var isRetryable: Bool {
+            switch self {
+            case .poweredOff, .unauthorized, .unsupported: false
+            case .advertisingFailed, .serviceSetupFailed: true
+            }
+        }
+    }
+
     weak var delegate: BLEHIDPeripheralDelegate?
 
-    /// Name shown in the host's Bluetooth UI. Set before startAdvertising().
-    var localName: String = Constants.appName
+    /// Name shown in the host's Bluetooth UI.
+    let localName: String
 
-    /// Adds AC Pan (horizontal scroll) to the mouse report, making it 5 bytes.
-    /// ClakRemote (iOS) opts in; Clak (macOS) keeps the original 4-byte report
-    /// so existing bonds stay valid. Set before startAdvertising().
-    var includeHorizontalScroll = false
+    /// Report layout, frozen at init: the published report map and the payload
+    /// sizes sent later can never disagree.
+    let reportMap: HIDReportMap
 
     private var peripheralManager: CBPeripheralManager!
 
@@ -60,160 +89,70 @@ final class BLEHIDPeripheralManager: NSObject {
     // Service Changed characteristic — used to signal bonded devices to re-discover GATT
     private var serviceChangedCharacteristic: CBMutableCharacteristic?
 
-    // Centrals that we've sent a Service Changed indication to
-    private var serviceChangedSent: Set<UUID> = []
+    // MARK: - Per-central sessions
 
-    // Track subscribed centrals, and which characteristics each is subscribed to —
-    // with three notify characteristics, unsubscribing from ONE must not be
-    // mistaken for a device disconnect
-    private var subscribedCentrals: [UUID: CBCentral] = [:]
-    private var subscriptionsByCentral: [UUID: Set<ObjectIdentifier>] = [:]
+    /// Everything we know about one central. "Connected" deliberately means
+    /// "subscribed to at least one input report" — a central that only
+    /// subscribed to Service Changed (2A05) cannot receive keystrokes, and
+    /// reporting it as connected would silently swallow every report.
+    private struct CentralSession {
+        let central: CBCentral
+        var subscriptions: Set<ObjectIdentifier> = []
+        var inputSubscriptions: Set<ObjectIdentifier> = []
+        var serviceChangedDelivered = false
+        var isConnected: Bool { !inputSubscriptions.isEmpty }
+    }
+
+    private var sessions: [UUID: CentralSession] = [:]
+
+    private var hasConnectedCentral: Bool {
+        sessions.values.contains { $0.isConnected }
+    }
+
+    // Centrals whose Service Changed indication bounced off a full notify
+    // queue — retried from peripheralManagerIsReady
+    private var pendingServiceChangedCentrals: [UUID] = []
 
     // FIFO of reports awaiting notification-queue space (updateValue returned false).
     // All access happens on the main queue (CBPeripheralManager's queue).
     private var pendingReports: [(data: Data, characteristic: CBMutableCharacteristic)] = []
     private let maxPendingReports = 64
 
-    private(set) var isAdvertising = false
+    // MARK: - Lifecycle state
+
+    /// Single source of truth for the publish/advertise state machine.
+    /// Every deferred continuation checks `setupGeneration` so a stale timer
+    /// from a cancelled setup can never mutate a newer one.
+    private enum Lifecycle: Equatable {
+        case idle          // no services in the GATT database
+        case publishing    // service-add chain in flight
+        case published     // services live, not advertising
+        case advertising
+    }
+
+    private var lifecycle: Lifecycle = .idle
+    private var wantsAdvertising = false
+    private var setupGeneration = 0
+    private var advertisingRequestInFlight = false
+    private var advertisingCancelledInFlight = false
+
     private(set) var isPoweredOn = false
 
-    /// Whether GATT services have been published at least once.
-    /// Once true, subsequent startAdvertising() calls skip service setup.
-    private(set) var areServicesPublished = false
+    var isAdvertising: Bool { lifecycle == .advertising }
+    var areServicesPublished: Bool { lifecycle == .published || lifecycle == .advertising }
 
-    // Track service addition to start advertising only after all services are added
-    private var servicesAdded = 0
-    private var totalServices = 0
-    private var pendingAdvertisingStart = false
+    /// Delay between service adds. macOS CoreBluetooth needs generous settling
+    /// around removeAllServices/add; iOS only gets a token hop so publishing
+    /// doesn't gate advertising behind a second of dead time.
+    private static let serviceAddSettleDelay: TimeInterval = {
+        #if os(macOS)
+        return 0.3
+        #else
+        return 0.05
+        #endif
+    }()
 
-    // MARK: - HID Report Descriptor
-
-    /// Combo HID report descriptor: keyboard (ID 1), consumer control (ID 2), mouse (ID 3).
-    ///
-    /// Notification payloads exclude the report ID — the per-characteristic
-    /// Report Reference descriptor maps each characteristic to its ID.
-    private static let hidReportDescriptor: [UInt8] = [
-        // ---- Keyboard (Report ID 1) ----
-        0x05, 0x01,       // Usage Page (Generic Desktop)
-        0x09, 0x06,       // Usage (Keyboard)
-        0xA1, 0x01,       // Collection (Application)
-        0x85, 0x01,       //   Report ID (1)
-        // Modifier keys (8 bits)
-        0x05, 0x07,       //   Usage Page (Keyboard/Keypad)
-        0x19, 0xE0,       //   Usage Minimum (Left Control)
-        0x29, 0xE7,       //   Usage Maximum (Right GUI)
-        0x15, 0x00,       //   Logical Minimum (0)
-        0x25, 0x01,       //   Logical Maximum (1)
-        0x75, 0x01,       //   Report Size (1)
-        0x95, 0x08,       //   Report Count (8)
-        0x81, 0x02,       //   Input (Data, Variable, Absolute)
-        // Reserved byte
-        0x95, 0x01,       //   Report Count (1)
-        0x75, 0x08,       //   Report Size (8)
-        0x81, 0x01,       //   Input (Constant)
-        // Key codes (6 bytes)
-        0x05, 0x07,       //   Usage Page (Keyboard/Keypad)
-        0x19, 0x00,       //   Usage Minimum (0)
-        0x29, 0xE7,       //   Usage Maximum (231)
-        0x15, 0x00,       //   Logical Minimum (0)
-        0x26, 0xE7, 0x00, //   Logical Maximum (231)
-        0x75, 0x08,       //   Report Size (8)
-        0x95, 0x06,       //   Report Count (6)
-        0x81, 0x00,       //   Input (Data, Array)
-        // LED Output Report (5 LEDs + 3 padding bits = 1 byte)
-        0x05, 0x08,       //   Usage Page (LEDs)
-        0x19, 0x01,       //   Usage Minimum (Num Lock)
-        0x29, 0x05,       //   Usage Maximum (Kana)
-        0x15, 0x00,       //   Logical Minimum (0)
-        0x25, 0x01,       //   Logical Maximum (1)
-        0x75, 0x01,       //   Report Size (1)
-        0x95, 0x05,       //   Report Count (5)
-        0x91, 0x02,       //   Output (Data, Variable, Absolute)
-        // Padding (3 bits)
-        0x75, 0x03,       //   Report Size (3)
-        0x95, 0x01,       //   Report Count (1)
-        0x91, 0x01,       //   Output (Constant)
-        0xC0,             // End Collection
-
-        // ---- Consumer Control (Report ID 2) ----
-        0x05, 0x0C,       // Usage Page (Consumer)
-        0x09, 0x01,       // Usage (Consumer Control)
-        0xA1, 0x01,       // Collection (Application)
-        0x85, 0x02,       //   Report ID (2)
-        0x15, 0x00,       //   Logical Minimum (0)
-        0x26, 0xFF, 0x03, //   Logical Maximum (0x03FF)
-        0x19, 0x00,       //   Usage Minimum (0)
-        0x2A, 0xFF, 0x03, //   Usage Maximum (0x03FF)
-        0x75, 0x10,       //   Report Size (16)
-        0x95, 0x01,       //   Report Count (1)
-        0x81, 0x00,       //   Input (Data, Array)
-        0xC0,             // End Collection
-
-        // ---- Mouse (Report ID 3) ----
-        0x05, 0x01,       // Usage Page (Generic Desktop)
-        0x09, 0x02,       // Usage (Mouse)
-        0xA1, 0x01,       // Collection (Application)
-        0x85, 0x03,       //   Report ID (3)
-        0x09, 0x01,       //   Usage (Pointer)
-        0xA1, 0x00,       //   Collection (Physical)
-        // Buttons 1-3
-        0x05, 0x09,       //     Usage Page (Buttons)
-        0x19, 0x01,       //     Usage Minimum (Button 1)
-        0x29, 0x03,       //     Usage Maximum (Button 3)
-        0x15, 0x00,       //     Logical Minimum (0)
-        0x25, 0x01,       //     Logical Maximum (1)
-        0x95, 0x03,       //     Report Count (3)
-        0x75, 0x01,       //     Report Size (1)
-        0x81, 0x02,       //     Input (Data, Variable, Absolute)
-        // Padding (5 bits)
-        0x95, 0x01,       //     Report Count (1)
-        0x75, 0x05,       //     Report Size (5)
-        0x81, 0x01,       //     Input (Constant)
-        // X, Y (relative, -127..127)
-        0x05, 0x01,       //     Usage Page (Generic Desktop)
-        0x09, 0x30,       //     Usage (X)
-        0x09, 0x31,       //     Usage (Y)
-        0x15, 0x81,       //     Logical Minimum (-127)
-        0x25, 0x7F,       //     Logical Maximum (127)
-        0x75, 0x08,       //     Report Size (8)
-        0x95, 0x02,       //     Report Count (2)
-        0x81, 0x06,       //     Input (Data, Variable, Relative)
-        // Wheel (relative, -127..127)
-        0x09, 0x38,       //     Usage (Wheel)
-        0x15, 0x81,       //     Logical Minimum (-127)
-        0x25, 0x7F,       //     Logical Maximum (127)
-        0x75, 0x08,       //     Report Size (8)
-        0x95, 0x01,       //     Report Count (1)
-        0x81, 0x06,       //     Input (Data, Variable, Relative)
-    ]
-
-    /// Optional AC Pan block spliced into the mouse collection when
-    /// includeHorizontalScroll is set — macOS maps it to horizontal wheel
-    /// on generic mice (tilt-wheel convention).
-    private static let acPanDescriptorBlock: [UInt8] = [
-        0x05, 0x0C,       //     Usage Page (Consumer)
-        0x0A, 0x38, 0x02, //     Usage (AC Pan)
-        0x15, 0x81,       //     Logical Minimum (-127)
-        0x25, 0x7F,       //     Logical Maximum (127)
-        0x75, 0x08,       //     Report Size (8)
-        0x95, 0x01,       //     Report Count (1)
-        0x81, 0x06,       //     Input (Data, Variable, Relative)
-    ]
-
-    private static let descriptorEnd: [UInt8] = [
-        0xC0,             //   End Collection
-        0xC0              // End Collection
-    ]
-
-    private var reportDescriptor: [UInt8] {
-        Self.hidReportDescriptor
-            + (includeHorizontalScroll ? Self.acPanDescriptorBlock : [])
-            + Self.descriptorEnd
-    }
-
-    private var mouseReportSize: Int {
-        includeHorizontalScroll ? 5 : 4
-    }
+    private static let warmupServiceUUID = CBUUID(string: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")
 
     // MARK: - GATT UUIDs (128-bit form to bypass CoreBluetooth restriction)
 
@@ -239,64 +178,101 @@ final class BLEHIDPeripheralManager: NSObject {
 
     // MARK: - Init
 
-    override init() {
+    /// - Parameters:
+    ///   - restoreIdentifier: iOS only — opts into CoreBluetooth state
+    ///     restoration so the system relaunches the app when a bonded central
+    ///     acts on our services after the app was jettisoned. Ignored on macOS
+    ///     (unsupported there).
+    init(localName: String = Constants.appName,
+         includeHorizontalScroll: Bool = false,
+         restoreIdentifier: String? = nil) {
+        self.localName = localName
+        self.reportMap = HIDReportMap(includeHorizontalScroll: includeHorizontalScroll)
         super.init()
+
+        #if os(iOS)
+        var options: [String: Any] = [:]
+        if let restoreIdentifier {
+            options[CBPeripheralManagerOptionRestoreIdentifierKey] = restoreIdentifier
+        }
+        peripheralManager = CBPeripheralManager(delegate: self, queue: .main, options: options)
+        #else
+        _ = restoreIdentifier
         peripheralManager = CBPeripheralManager(delegate: self, queue: .main)
+        #endif
     }
 
     // MARK: - Start / Stop
 
-    /// Start advertising. If services are already published, just resumes advertising.
+    /// Start advertising, publishing services first if needed. Safe to call in
+    /// any state: while publishing it just records the intent, before power-on
+    /// it defers until the state callback arrives.
     func startAdvertising() {
         guard isPoweredOn else {
-            Log.bluetooth.error("BLE: Cannot advertise — Bluetooth not powered on")
-            delegate?.peripheralDidFailWithError("Bluetooth is powered off")
-            return
-        }
-        guard !isAdvertising else {
-            Log.bluetooth.info("BLE: Already advertising")
+            switch peripheralManager.state {
+            case .poweredOff:
+                Log.bluetooth.error("BLE: Cannot advertise — Bluetooth powered off")
+                delegate?.peripheralDidFail(.poweredOff)
+            case .unauthorized:
+                delegate?.peripheralDidFail(.unauthorized)
+            case .unsupported:
+                delegate?.peripheralDidFail(.unsupported)
+            default:
+                // .unknown/.resetting at cold launch — the poweredOn callback
+                // re-enters via the delegate, so no error flash in the meantime
+                Log.bluetooth.info("BLE: Advertising deferred until power on")
+                wantsAdvertising = true
+            }
             return
         }
 
-        if areServicesPublished {
-            resumeAdvertising()
-        } else {
-            servicesAdded = 0
-            pendingAdvertisingStart = true
-            setupServices()
+        switch lifecycle {
+        case .advertising:
+            Log.bluetooth.info("BLE: Already advertising")
+        case .publishing:
+            wantsAdvertising = true
+        case .published:
+            beginAdvertising()
+        case .idle:
+            wantsAdvertising = true
+            publishServices()
         }
     }
 
-    /// Lightweight resume — just starts advertising without rebuilding services.
+    /// Compatibility alias — startAdvertising() now handles every state.
     func resumeAdvertising() {
-        guard isPoweredOn, !isAdvertising else {
-            return
-        }
-        beginAdvertising()
+        startAdvertising()
     }
 
     /// Stops advertising but keeps GATT services intact for fast reconnection.
+    /// If a publish is in flight it completes, but advertising won't auto-start.
     func stopAdvertisingOnly() {
-        pendingAdvertisingStart = false
-        if isAdvertising {
+        wantsAdvertising = false
+        if advertisingRequestInFlight {
+            advertisingCancelledInFlight = true
+        }
+        if lifecycle == .advertising {
             peripheralManager.stopAdvertising()
-            isAdvertising = false
+            lifecycle = .published
             Log.bluetooth.info("BLE: Stopped advertising (services retained)")
         }
     }
 
     /// Full teardown — removes all services. Only for app termination.
     func teardownCompletely() {
-        pendingAdvertisingStart = false
+        setupGeneration += 1
+        pendingServiceQueue.removeAll()
+        wantsAdvertising = false
+        advertisingRequestInFlight = false
+        advertisingCancelledInFlight = false
 
-        if isAdvertising {
+        if lifecycle == .advertising {
             peripheralManager.stopAdvertising()
         }
 
         peripheralManager.removeAllServices()
-        subscribedCentrals.removeAll()
-        subscriptionsByCentral.removeAll()
-        serviceChangedSent.removeAll()
+        sessions.removeAll()
+        pendingServiceChangedCentrals.removeAll()
         inputReportCharacteristic = nil
         consumerReportCharacteristic = nil
         mouseReportCharacteristic = nil
@@ -306,8 +282,7 @@ final class BLEHIDPeripheralManager: NSObject {
         currentProtocolMode = 0x01
         ledState = 0
         pendingReports.removeAll()
-        isAdvertising = false
-        areServicesPublished = false
+        lifecycle = .idle
 
         Log.bluetooth.info("BLE: Torn down completely")
         delegate?.peripheralDidStopAdvertising()
@@ -317,16 +292,17 @@ final class BLEHIDPeripheralManager: NSObject {
 
     /// Send a keyboard input report via BLE notification.
     /// Format (no Report ID): [modifiers, 0x00, k1, k2, k3, k4, k5, k6] = 8 bytes
+    /// - Returns: true if the report went out immediately; false if it was
+    ///   queued (or no central is subscribed). Queued senders should wait for
+    ///   peripheralIsReadyToSend() before pushing more.
     @discardableResult
     func sendKeyboardReport(modifiers: UInt8, keyCodes: [UInt8]) -> Bool {
-        guard let characteristic = inputReportCharacteristic else {
-            return false
-        }
-        guard !subscribedCentrals.isEmpty else {
+        guard let characteristic = inputReportCharacteristic,
+              hasSubscriber(to: characteristic) else {
             return false
         }
 
-        var reportBytes = [UInt8](repeating: 0, count: 8)
+        var reportBytes = [UInt8](repeating: 0, count: HIDReportMap.keyboardReportSize)
         reportBytes[0] = modifiers
         // reportBytes[1] = 0x00 (reserved)
         for i in 0..<min(keyCodes.count, 6) {
@@ -336,9 +312,46 @@ final class BLEHIDPeripheralManager: NSObject {
         return sendReport(Data(reportBytes), on: characteristic)
     }
 
+    @discardableResult
+    func sendKeyRelease() -> Bool {
+        sendKeyboardReport(modifiers: 0, keyCodes: [])
+    }
+
+    /// Send a consumer control report (16-bit usage, little-endian). Usage 0 = release.
+    @discardableResult
+    func sendConsumerReport(usage: UInt16) -> Bool {
+        guard let characteristic = consumerReportCharacteristic,
+              hasSubscriber(to: characteristic) else {
+            return false
+        }
+        return sendReport(Data([UInt8(usage & 0xFF), UInt8(usage >> 8)]), on: characteristic)
+    }
+
+    /// Send a mouse report: [buttons, dx, dy, wheel] (+ pan when enabled).
+    @discardableResult
+    func sendMouseReport(buttons: UInt8, dx: Int8, dy: Int8, wheel: Int8, pan: Int8 = 0) -> Bool {
+        guard let characteristic = mouseReportCharacteristic,
+              hasSubscriber(to: characteristic) else {
+            return false
+        }
+        var bytes: [UInt8] = [
+            buttons,
+            UInt8(bitPattern: dx), UInt8(bitPattern: dy),
+            UInt8(bitPattern: wheel),
+        ]
+        if reportMap.includeHorizontalScroll {
+            bytes.append(UInt8(bitPattern: pan))
+        }
+        return sendReport(Data(bytes), on: characteristic)
+    }
+
+    private func hasSubscriber(to characteristic: CBMutableCharacteristic) -> Bool {
+        let id = ObjectIdentifier(characteristic)
+        return sessions.values.contains { $0.subscriptions.contains(id) }
+    }
+
     /// Send via notification, preserving order: if reports are already queued,
     /// new ones join the back of the FIFO instead of jumping ahead.
-    @discardableResult
     private func sendReport(_ data: Data, on characteristic: CBMutableCharacteristic) -> Bool {
         guard pendingReports.isEmpty else {
             enqueuePendingReport(data, on: characteristic)
@@ -359,69 +372,48 @@ final class BLEHIDPeripheralManager: NSObject {
         pendingReports.append((data, characteristic))
     }
 
-    @discardableResult
-    func sendKeyRelease() -> Bool {
-        sendKeyboardReport(modifiers: 0, keyCodes: [])
-    }
-
-    /// Send a consumer control report (16-bit usage, little-endian). Usage 0 = release.
-    @discardableResult
-    func sendConsumerReport(usage: UInt16) -> Bool {
-        guard let characteristic = consumerReportCharacteristic, !subscribedCentrals.isEmpty else {
-            return false
-        }
-        return sendReport(Data([UInt8(usage & 0xFF), UInt8(usage >> 8)]), on: characteristic)
-    }
-
-    /// Send a mouse report: [buttons, dx, dy, wheel] (+ pan when enabled).
-    @discardableResult
-    func sendMouseReport(buttons: UInt8, dx: Int8, dy: Int8, wheel: Int8, pan: Int8 = 0) -> Bool {
-        guard let characteristic = mouseReportCharacteristic, !subscribedCentrals.isEmpty else {
-            return false
-        }
-        var bytes: [UInt8] = [
-            buttons,
-            UInt8(bitPattern: dx), UInt8(bitPattern: dy),
-            UInt8(bitPattern: wheel),
-        ]
-        if includeHorizontalScroll {
-            bytes.append(UInt8(bitPattern: pan))
-        }
-        return sendReport(Data(bytes), on: characteristic)
-    }
-
-    // MARK: - Build GATT Services
-
-    private func setupServices() {
-        peripheralManager.removeAllServices()
-
-        // CBPeripheralManager throws NSInternalInconsistencyException on the first
-        // add() call. Work around this by adding a disposable "warm-up" service first,
-        // then adding the real services after the callback.
-        let warmupUUID = CBUUID(string: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")
-        let warmup = CBMutableService(type: warmupUUID, primary: false)
-        warmup.characteristics = []
-
-        let services: [(String, CBMutableService)] = [
-            ("_warmup", warmup),
-            ("GATT", buildGenericAttributeService()),
-            ("HID", buildHIDService()),
-            ("DeviceInfo", buildDeviceInfoService()),
-        ]
-
-        totalServices = services.count
-        pendingServiceQueue = services
-
-        // Delay after removeAllServices
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.addNextService()
-        }
-    }
+    // MARK: - Publish GATT Services
 
     private var pendingServiceQueue: [(String, CBMutableService)] = []
 
-    private func addNextService() {
-        guard !pendingServiceQueue.isEmpty else {
+    private func publishServices() {
+        lifecycle = .publishing
+        setupGeneration += 1
+        let generation = setupGeneration
+
+        peripheralManager.removeAllServices()
+
+        var services: [(String, CBMutableService)] = []
+
+        // CBPeripheralManager can throw NSInternalInconsistencyException on the
+        // first add() call after init/removeAllServices. A disposable "warm-up"
+        // service absorbs it so the real services add cleanly. Only proven
+        // necessary on macOS, but kept on iOS too until on-device testing shows
+        // the first add is safe there — a thrown add now aborts publishing.
+        let warmup = CBMutableService(type: Self.warmupServiceUUID, primary: false)
+        warmup.characteristics = []
+        services.append(("_warmup", warmup))
+
+        services.append(("GATT", buildGenericAttributeService()))
+        services.append(("HID", buildHIDService()))
+        services.append(("DeviceInfo", buildDeviceInfoService()))
+
+        pendingServiceQueue = services
+
+        // Delay after removeAllServices
+        scheduleNextServiceAdd(generation: generation)
+    }
+
+    private func scheduleNextServiceAdd(generation: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.serviceAddSettleDelay) { [weak self] in
+            guard let self, self.setupGeneration == generation else { return }
+            self.addNextService(generation: generation)
+        }
+    }
+
+    private func addNextService(generation: Int) {
+        guard setupGeneration == generation, lifecycle == .publishing,
+              !pendingServiceQueue.isEmpty else {
             return
         }
 
@@ -432,25 +424,41 @@ final class BLEHIDPeripheralManager: NSObject {
             self.peripheralManager.add(service)
         }
         if let exception {
-            Log.bluetooth.error("BLE: Exception adding \(name) service: \(exception.name.rawValue): \(exception.reason ?? "unknown")")
-            serviceAddCompleted()
+            if service.uuid == Self.warmupServiceUUID {
+                // Expected: the warm-up service exists to absorb this. No didAdd
+                // callback will come, so continue the chain from here.
+                Log.bluetooth.info("BLE: Warm-up service absorbed \(exception.name.rawValue)")
+                scheduleNextServiceAdd(generation: generation)
+            } else {
+                abortPublishing(reason: "\(name): \(exception.name.rawValue): \(exception.reason ?? "unknown")")
+            }
         }
-        // If no exception, wait for didAdd delegate callback which calls serviceAddCompleted
+        // If no exception, wait for the didAdd delegate callback
     }
 
-    /// Advance the service-add queue: start advertising once all services are in,
-    /// otherwise schedule the next add after a small delay to let CoreBluetooth settle.
-    private func serviceAddCompleted() {
-        servicesAdded += 1
+    /// A real service failed to add: report it instead of advertising a GATT
+    /// database with holes (an HID advertisement without an HID service is
+    /// discoverable but unpairable).
+    private func abortPublishing(reason: String) {
+        Log.bluetooth.error("BLE: Service setup failed — \(reason, privacy: .public)")
+        setupGeneration += 1
+        pendingServiceQueue.removeAll()
+        wantsAdvertising = false
+        lifecycle = .idle
+        delegate?.peripheralDidFail(.serviceSetupFailed(reason))
+    }
 
-        if servicesAdded >= totalServices && pendingAdvertisingStart {
-            pendingAdvertisingStart = false
-            areServicesPublished = true
+    private func publishCompleted() {
+        lifecycle = .published
+        Log.bluetooth.info("BLE: All services published")
+
+        if hasConnectedCentral {
+            // A central subscribed mid-publish (bonded reconnect) — advertising
+            // now would invite a second host while one is already connected
+            wantsAdvertising = false
+        } else if wantsAdvertising {
+            wantsAdvertising = false
             beginAdvertising()
-        } else if !pendingServiceQueue.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.addNextService()
-            }
         }
     }
 
@@ -478,11 +486,11 @@ final class BLEHIDPeripheralManager: NSObject {
             value: Data([0x11, 0x01, 0x00, 0x02]), permissions: .readable
         ))
 
-        // Report Map: the HID report descriptor (keyboard only)
+        // Report Map: the HID report descriptor
         // HOGP spec requires Security Mode 1, Level 2 (encryption) for Report Map
         chars.append(CBMutableCharacteristic(
             type: GATT.reportMap, properties: .read,
-            value: Data(reportDescriptor), permissions: .readEncryptionRequired
+            value: Data(reportMap.descriptor), permissions: .readEncryptionRequired
         ))
 
         // Protocol Mode: Report Protocol (0x01)
@@ -570,8 +578,10 @@ final class BLEHIDPeripheralManager: NSObject {
         return service
     }
 
-
     private func beginAdvertising() {
+        guard !advertisingRequestInFlight else { return }
+        advertisingRequestInFlight = true
+
         // Advertise with the 16-bit HID service UUID for compact advertisement packets.
         // The service was registered using the 128-bit form (to bypass CoreBluetooth's
         // add restriction), but we advertise the 16-bit equivalent so the packet fits
@@ -582,7 +592,23 @@ final class BLEHIDPeripheralManager: NSObject {
         ]
 
         peripheralManager.startAdvertising(advertisementData)
-        Log.bluetooth.info("BLE: Requesting advertising start (services published: \(self.areServicesPublished))")
+        Log.bluetooth.info("BLE: Requesting advertising start")
+    }
+
+    /// Radio went away (.poweredOff/.resetting/.unknown): CoreBluetooth drops
+    /// published services and connections, so every layer of live state resets
+    /// and the next advertise does a full re-publish.
+    private func resetForRadioLoss() {
+        isPoweredOn = false
+        setupGeneration += 1
+        pendingServiceQueue.removeAll()
+        lifecycle = .idle
+        wantsAdvertising = false
+        advertisingRequestInFlight = false
+        advertisingCancelledInFlight = false
+        sessions.removeAll()
+        pendingServiceChangedCentrals.removeAll()
+        pendingReports.removeAll()
     }
 }
 
@@ -597,98 +623,145 @@ extension BLEHIDPeripheralManager: CBPeripheralManagerDelegate {
             Log.bluetooth.info("BLE: Bluetooth powered on")
             delegate?.peripheralDidPowerOn()
         case .poweredOff:
-            isPoweredOn = false
-            isAdvertising = false
-            subscribedCentrals.removeAll()
-            subscriptionsByCentral.removeAll()
-            // Forget who got Service Changed — after a power cycle the GATT db is
-            // rebuilt and reconnecting centrals must be told to re-discover
-            serviceChangedSent.removeAll()
-            // CoreBluetooth drops published services on power-off — force a full
-            // re-publish on the next advertise instead of resuming with an empty GATT db
-            areServicesPublished = false
-            pendingServiceQueue.removeAll()
-            servicesAdded = 0
-            totalServices = 0
-            pendingAdvertisingStart = false
-            pendingReports.removeAll()
+            resetForRadioLoss()
             Log.bluetooth.warning("BLE: Bluetooth powered off")
-            delegate?.peripheralDidFailWithError("Bluetooth is powered off")
+            delegate?.peripheralDidFail(.poweredOff)
         case .unauthorized:
             isPoweredOn = false
             Log.bluetooth.error("BLE: Bluetooth unauthorized")
-            delegate?.peripheralDidFailWithError("Bluetooth access not authorized")
+            delegate?.peripheralDidFail(.unauthorized)
         case .unsupported:
             isPoweredOn = false
             Log.bluetooth.error("BLE: BLE not supported")
-            delegate?.peripheralDidFailWithError("Bluetooth LE is not supported on this hardware")
-        default:
+            delegate?.peripheralDidFail(.unsupported)
+        case .resetting, .unknown:
+            // bluetoothd restarting — hold everything until the next .poweredOn
+            resetForRadioLoss()
+            Log.bluetooth.warning("BLE: Bluetooth resetting")
+        @unknown default:
             break
         }
     }
 
+    #if os(iOS)
+    func peripheralManager(_ peripheral: CBPeripheralManager, willRestoreState dict: [String: Any]) {
+        // The system relaunched us for a bonded central. Restored services are
+        // rebuilt from scratch on the next startAdvertising() — the bond
+        // survives, and Service Changed covers any handle movement.
+        let restoredServices = (dict[CBPeripheralManagerRestoredStateServicesKey] as? [CBMutableService]) ?? []
+        Log.bluetooth.info("BLE: Restored by system (\(restoredServices.count) services) — will re-publish")
+    }
+    #endif
+
     func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager, error: Error?) {
+        advertisingRequestInFlight = false
+
         if let error {
+            advertisingCancelledInFlight = false
             Log.bluetooth.error("BLE: Advertising failed: \(error.localizedDescription)")
-            isAdvertising = false
-            delegate?.peripheralDidFailWithError("BLE advertising failed: \(error.localizedDescription)")
+            delegate?.peripheralDidFail(.advertisingFailed(error.localizedDescription))
             return
         }
 
-        isAdvertising = true
-        Log.bluetooth.info("BLE: Advertising started — visible as 'Clak' HID keyboard")
+        // stopAdvertisingOnly() (or a mid-publish subscription) raced the
+        // confirmation — honor the stop
+        guard !advertisingCancelledInFlight, lifecycle == .published else {
+            advertisingCancelledInFlight = false
+            if lifecycle != .advertising {
+                peripheral.stopAdvertising()
+            }
+            return
+        }
+        lifecycle = .advertising
+        Log.bluetooth.info("BLE: Advertising started as '\(self.localName, privacy: .public)'")
         delegate?.peripheralDidStartAdvertising()
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
-        let uuid = service.uuid.uuidString
-
-        if let error {
-            Log.bluetooth.error("BLE: Failed to add service \(uuid, privacy: .public): \(error.localizedDescription, privacy: .public)")
-        } else {
-            Log.bluetooth.info("BLE: Service added successfully: \(uuid, privacy: .public)")
+        guard lifecycle == .publishing else {
+            Log.bluetooth.warning("BLE: didAdd \(service.uuid.uuidString, privacy: .public) outside publishing — ignored")
+            return
         }
 
-        serviceAddCompleted()
+        if let error {
+            if service.uuid == Self.warmupServiceUUID {
+                Log.bluetooth.info("BLE: Warm-up service add failed (expected): \(error.localizedDescription)")
+            } else {
+                abortPublishing(reason: "\(service.uuid.uuidString): \(error.localizedDescription)")
+                return
+            }
+        } else {
+            Log.bluetooth.info("BLE: Service added successfully: \(service.uuid.uuidString, privacy: .public)")
+        }
+
+        if pendingServiceQueue.isEmpty {
+            publishCompleted()
+        } else {
+            scheduleNextServiceAdd(generation: setupGeneration)
+        }
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
         Log.bluetooth.info("BLE: Central \(central.identifier.uuidString, privacy: .public) subscribed to \(characteristic.uuid.uuidString, privacy: .public)")
 
-        let wasEmpty = subscribedCentrals.isEmpty
-        subscribedCentrals[central.identifier] = central
-        subscriptionsByCentral[central.identifier, default: []].insert(ObjectIdentifier(characteristic))
+        let centralID = central.identifier
+        var session = sessions[centralID] ?? CentralSession(central: central)
+        let charID = ObjectIdentifier(characteristic)
+        let wasConnected = session.isConnected
 
-        // Stop advertising once connected — saves power
-        if isAdvertising {
+        session.subscriptions.insert(charID)
+        if isInputReport(characteristic) {
+            session.inputSubscriptions.insert(charID)
+        }
+        sessions[centralID] = session
+
+        guard !wasConnected, session.isConnected else { return }
+
+        // Stop advertising once a central can actually receive input — saves
+        // power and avoids inviting a second host mid-session
+        wantsAdvertising = false
+        if advertisingRequestInFlight {
+            advertisingCancelledInFlight = true
+        }
+        if lifecycle == .advertising {
             peripheralManager.stopAdvertising()
-            isAdvertising = false
+            lifecycle = .published
             Log.bluetooth.info("BLE: Stopped advertising (device connected)")
         }
 
-        if wasEmpty {
-            delegate?.peripheralDidConnect(central: central)
-        }
+        delegate?.peripheralDidConnect(central: central)
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didUnsubscribeFrom characteristic: CBCharacteristic) {
         Log.bluetooth.info("BLE: Central \(central.identifier.uuidString, privacy: .public) unsubscribed from \(characteristic.uuid.uuidString, privacy: .public)")
 
         let centralID = central.identifier
-        subscriptionsByCentral[centralID]?.remove(ObjectIdentifier(characteristic))
+        guard var session = sessions[centralID] else { return }
 
-        // Only a central with no remaining subscriptions has disconnected
-        guard subscriptionsByCentral[centralID]?.isEmpty ?? true else {
-            return
+        let charID = ObjectIdentifier(characteristic)
+        let wasConnected = session.isConnected
+        session.subscriptions.remove(charID)
+        session.inputSubscriptions.remove(charID)
+
+        if session.subscriptions.isEmpty {
+            sessions.removeValue(forKey: centralID)
+            pendingServiceChangedCentrals.removeAll { $0 == centralID }
+        } else {
+            sessions[centralID] = session
         }
-        subscriptionsByCentral.removeValue(forKey: centralID)
-        subscribedCentrals.removeValue(forKey: centralID)
 
-        if subscribedCentrals.isEmpty {
-            pendingReports.removeAll()
-            serviceChangedSent.removeAll()
+        if wasConnected && !session.isConnected {
+            if !hasConnectedCentral {
+                pendingReports.removeAll()
+            }
             delegate?.peripheralDidDisconnect(central: central)
         }
+    }
+
+    private func isInputReport(_ characteristic: CBCharacteristic) -> Bool {
+        characteristic === inputReportCharacteristic
+            || characteristic === consumerReportCharacteristic
+            || characteristic === mouseReportCharacteristic
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
@@ -700,9 +773,9 @@ extension BLEHIDPeripheralManager: CBPeripheralManagerDelegate {
             || request.characteristic === mouseReportCharacteristic {
             // Return an empty report sized for the characteristic's report type
             // (payloads exclude the Report ID per HOGP)
-            let size = request.characteristic === inputReportCharacteristic ? 8
-                : request.characteristic === mouseReportCharacteristic ? mouseReportSize
-                : 2
+            let size = request.characteristic === inputReportCharacteristic ? HIDReportMap.keyboardReportSize
+                : request.characteristic === mouseReportCharacteristic ? reportMap.mouseReportSize
+                : HIDReportMap.consumerReportSize
             respond(to: request, with: Data([UInt8](repeating: 0, count: size)), peripheral: peripheral)
         } else if request.characteristic === outputReportCharacteristic {
             respond(to: request, with: Data([ledState]), peripheral: peripheral)
@@ -716,8 +789,10 @@ extension BLEHIDPeripheralManager: CBPeripheralManagerDelegate {
     }
 
     /// Answer a read request with `data`, honoring the requested offset.
+    /// Offset == length answers a final ATT Read Blob with a zero-length
+    /// success, as the spec requires; only offset beyond that is an error.
     private func respond(to request: CBATTRequest, with data: Data, peripheral: CBPeripheralManager) {
-        if request.offset >= data.count {
+        if request.offset > data.count {
             peripheral.respond(to: request, withResult: .invalidOffset)
         } else {
             request.value = data.subdata(in: request.offset..<data.count)
@@ -735,14 +810,7 @@ extension BLEHIDPeripheralManager: CBPeripheralManagerDelegate {
             if request.characteristic.uuid == GATT.hidControlPoint {
                 if let data = request.value, let cmd = data.first {
                     Log.bluetooth.info("BLE: HID Control Point cmd=\(cmd, privacy: .public) (\(cmd == 0 ? "Suspend" : "Exit Suspend", privacy: .public))")
-
-                    // If this central hasn't subscribed to Report and we haven't sent
-                    // Service Changed yet, send it to force GATT re-discovery
-                    let centralID = request.central.identifier
-                    if subscribedCentrals[centralID] == nil && !serviceChangedSent.contains(centralID) {
-                        serviceChangedSent.insert(centralID)
-                        sendServiceChangedIndication()
-                    }
+                    nudgeStaleCentralIfNeeded(request.central)
                 }
             } else if request.characteristic === outputReportCharacteristic {
                 if let data = request.value, let led = data.first {
@@ -764,29 +832,68 @@ extension BLEHIDPeripheralManager: CBPeripheralManagerDelegate {
         }
     }
 
-    /// Send a Service Changed indication to force bonded centrals to re-discover GATT services.
-    /// The handle range starts at 0x0010 to exclude the GATT service itself (handles ~0x0001-0x000F).
-    /// iOS marks GATT as invalid and ignores all future Service Changed if the range includes it.
-    private func sendServiceChangedIndication() {
-        guard let characteristic = serviceChangedCharacteristic else {
-            Log.bluetooth.error("BLE: Service Changed characteristic not available")
+    // MARK: - Service Changed
+
+    /// A central writing HID Control Point believes HID setup is finished. If
+    /// it still hasn't subscribed to any input report, its GATT cache is stale
+    /// (it can't see our Report characteristics) — indicate Service Changed so
+    /// it re-discovers, instead of leaving typing silently dead until the user
+    /// does "Forget This Device".
+    private func nudgeStaleCentralIfNeeded(_ central: CBCentral) {
+        let centralID = central.identifier
+        guard let session = sessions[centralID],
+              !session.isConnected,
+              !session.serviceChangedDelivered else {
+            return
+        }
+        guard let characteristic = serviceChangedCharacteristic,
+              session.subscriptions.contains(ObjectIdentifier(characteristic)) else {
+            Log.bluetooth.warning("BLE: Central looks stale but isn't subscribed to Service Changed — can't nudge")
+            return
+        }
+        deliverServiceChanged(to: centralID)
+    }
+
+    /// Marks delivery only when updateValue actually accepted the indication;
+    /// a bounce (full notify queue) is retried from peripheralManagerIsReady.
+    private func deliverServiceChanged(to centralID: UUID) {
+        guard let characteristic = serviceChangedCharacteristic,
+              let session = sessions[centralID] else {
             return
         }
 
         // Service Changed value: [start_handle_lo, start_handle_hi, end_handle_lo, end_handle_hi]
-        // 0x0010 to 0xFFFF = excludes GATT service handles to avoid iOS caching bug
+        // 0x0010 to 0xFFFF = excludes GATT service handles (~0x0001-0x000F) — iOS
+        // marks GATT invalid and ignores all future indications if the range includes it
         let data = Data([0x10, 0x00, 0xFF, 0xFF])
-        let sent = peripheralManager.updateValue(data, for: characteristic, onSubscribedCentrals: nil)
+        let sent = peripheralManager.updateValue(data, for: characteristic, onSubscribedCentrals: [session.central])
         Log.bluetooth.info("BLE: Service Changed indication sent=\(sent, privacy: .public)")
+
+        if sent {
+            sessions[centralID]?.serviceChangedDelivered = true
+            pendingServiceChangedCentrals.removeAll { $0 == centralID }
+        } else if !pendingServiceChangedCentrals.contains(centralID) {
+            pendingServiceChangedCentrals.append(centralID)
+        }
     }
 
     func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
+        // Indications first: an undelivered Service Changed means a stale
+        // central that's ignoring the reports queued behind it anyway
+        for centralID in pendingServiceChangedCentrals {
+            deliverServiceChanged(to: centralID)
+        }
+
         while !pendingReports.isEmpty {
             let (data, characteristic) = pendingReports.removeFirst()
             if !peripheral.updateValue(data, for: characteristic, onSubscribedCentrals: nil) {
                 pendingReports.insert((data, characteristic), at: 0)
                 break
             }
+        }
+
+        if pendingReports.isEmpty {
+            delegate?.peripheralIsReadyToSend()
         }
     }
 }
