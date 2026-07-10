@@ -29,6 +29,16 @@ You already own great input devices. Use them everywhere.
 
 > **Pointer on iPhone:** enable **Settings → Accessibility → Touch → AssistiveTouch** to get a cursor. iPads show a pointer natively.
 
+> **Clak Remote not showing up on the Mac?** If your Mac is signed into the same iCloud account as this iPhone, macOS already knows the phone and may not list Clak Remote as a new keyboard. Run this **once** to make macOS discover it — it reconnects automatically from then on:
+>
+> ```sh
+> # requires Xcode command-line tools: xcode-select --install
+> # open Clak Remote on the iPhone first (foreground, showing "Advertising"), then:
+> curl -fsSL https://raw.githubusercontent.com/sryo/clak/main/clak-remote-bootstrap.sh | bash
+> ```
+>
+> Click **Allow** if macOS asks to use Bluetooth.
+
 ## Usage
 
 | Action | Shortcut |
