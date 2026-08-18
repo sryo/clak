@@ -618,7 +618,7 @@ open Clak.xcodeproj</pre>
       dot.classList.remove('is-searching');
       dot.classList.add('is-connected');
       cursorIcon.classList.add('is-on');
-      setHint('Type to iPhone de Mateo...');
+      setHint('Type to device...');
     }, 1600);
 
     function setHint(text) {
@@ -635,7 +635,7 @@ open Clak.xcodeproj</pre>
 
     function paint() {
       if (!typed) {
-        setHint('Type to iPhone de Mateo...');
+        setHint('Type to device...');
         return;
       }
       hudText.textContent = typed;
