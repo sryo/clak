@@ -70,12 +70,14 @@ enum ControlMetrics {
 /// the feedback the flat glyph-on-glass keys had none of. Also carries the
 /// disabled appearance, so `.disabled()` looks disabled rather than identical.
 struct KeyPress: ButtonStyle {
-    var tint: Color?
+    /// Applied inside the style, so it wins over any foregroundStyle the
+    /// caller puts outside the button.
+    var tint: AnyShapeStyle?
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.primary))
+            .foregroundStyle(tint ?? AnyShapeStyle(.primary))
             .opacity(isEnabled ? (configuration.isPressed ? 0.45 : 1) : 0.3)
             .scaleEffect(configuration.isPressed ? 0.92 : 1)
             .animation(.spring(response: 0.22, dampingFraction: 0.7), value: configuration.isPressed)

@@ -447,7 +447,7 @@ struct ControlBar: View {
                 .frame(maxWidth: .infinity, minHeight: height ?? keyHeight)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(KeyPress(tint: tint))
+        .buttonStyle(KeyPress(tint: tint.map(AnyShapeStyle.init)))
         .accessibilityLabel(label)
     }
 
@@ -471,9 +471,14 @@ struct ControlBar: View {
     }
 
     /// Held modifiers are the one place colour appears in the keys layer.
-    /// A held modifier is filled, not merely tinted. Colour alone would fail
-    /// anyone who can't resolve the hue — and the tint is DIMMER than the
-    /// resting white, so latching Shift would otherwise read as disabling it.
+    /// A held modifier is painted, not filled — a slab of colour behind the
+    /// glyph fights the glass it sits on.
+    ///
+    /// The original version failed for a subtler reason than "colour alone":
+    /// the tint is DIMMER than white, so latching Shift made the key recede
+    /// and read as disabled. Resting keys are dimmed instead, so holding one
+    /// is the brightest thing in the row, and the stroke thickens with it —
+    /// which is a difference that survives not being able to see the hue.
     private func modifier(
         _ systemName: String,
         _ label: String,
@@ -486,16 +491,13 @@ struct ControlBar: View {
             controller.toggleModifier(bit)
         } label: {
             Image(systemName: systemName)
-                .font(.system(size: 27))
+                .font(.system(size: 27, weight: active ? .semibold : .regular))
                 .frame(maxWidth: .infinity, minHeight: height ?? keyHeight)
-                .background(
-                    Capsule()
-                        .fill(active ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.clear))
-                        .padding(.vertical, 6)
-                )
                 .contentShape(Rectangle())
         }
-        .buttonStyle(KeyPress(tint: active ? .black : nil))
+        .buttonStyle(KeyPress(tint: active
+            ? AnyShapeStyle(.tint)
+            : AnyShapeStyle(Color.white.opacity(0.62))))
         .accessibilityLabel(label)
         .accessibilityValue(active ? "On" : "Off")
         .accessibilityAddTraits(active ? [.isSelected] : [])
