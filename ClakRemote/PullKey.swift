@@ -49,11 +49,15 @@ struct PullKey<Label: View>: View {
     @State private var steppedTranslation: CGFloat = 0
     @State private var steps = 0
     @State private var isPulling = false
+    /// @GestureState reverts on its own when a gesture is cancelled, which is
+    /// the only reliable signal that an interrupted drag has ended.
+    @GestureState private var isDragging = false
     /// Distance from the top of the screen to the top of this key — how much
     /// room a column has to grow into. Measured rather than assumed, because
     /// in landscape the whole screen is shorter than a portrait column.
     @State private var roomAbove: CGFloat = 400
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
@@ -64,8 +68,8 @@ struct PullKey<Label: View>: View {
             // marking that is information rather than clutter — the same mark
             // iOS puts on a stepper. Unlike the hints, it never retires.
             Image(systemName: axis == .vertical ? "chevron.up.chevron.down" : "chevron.left.chevron.right")
-                .font(.system(size: 7, weight: .semibold))
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
         }
             .offset(x: axis == .horizontal ? tug : 0, y: axis == .vertical ? tug : 0)
             .frame(maxWidth: .infinity, minHeight: ControlMetrics.keyHeight(compact: isCompact))
@@ -74,7 +78,9 @@ struct PullKey<Label: View>: View {
                 GeometryReader { geo in
                     Color.clear
                         .onAppear { roomAbove = geo.frame(in: .global).minY }
-                        .onChange(of: geo.frame(in: .global).minY) { _, top in roomAbove = top }
+                        .onChange(of: geo.frame(in: .global).minY) { _, top in
+                            if abs(top - roomAbove) > 1 { roomAbove = top }
+                        }
                 }
             )
             // Both tracks rise clear of the key rather than sitting on it: a
@@ -89,7 +95,22 @@ struct PullKey<Label: View>: View {
                 }
             }
             .gesture(pull)
-            .animation(.spring(response: 0.32, dampingFraction: 0.78), value: isPulling)
+            .onChange(of: isDragging) { _, dragging in
+                if !dragging { endPull() }
+            }
+            .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.78), value: isPulling)
+            // The step callbacks are exactly the shape an adjustable action
+            // wants, so the value is reachable without performing the drag.
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(onTap == nil ? [] : .isButton)
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: onStep(1)
+                case .decrement: onStep(-1)
+                @unknown default: break
+                }
+            }
+            .accessibilityAction { onTap?() }
     }
 
     private var isCompact: Bool { verticalSizeClass == .compact }
@@ -100,8 +121,16 @@ struct PullKey<Label: View>: View {
         min(396, max(150, roomAbove - 24))
     }
 
+    /// Everything a pull accumulates, cleared on any ending — normal or not.
+    private func endPull() {
+        steppedTranslation = 0
+        steps = 0
+        isPulling = false
+    }
+
     private var pull: some Gesture {
         DragGesture(minimumDistance: 0)
+            .updating($isDragging) { _, dragging, _ in dragging = true }
             .onChanged { value in
                 let travel = axis == .vertical ? value.translation.height : value.translation.width
                 // Up and right are positive; on screen, up is negative height.
@@ -120,21 +149,21 @@ struct PullKey<Label: View>: View {
                     haptic.impactOccurred()
                 }
 
-                // Only claim the pull once it has actually moved, so a tap
-                // never flashes the track open on its way past.
-                if !isPulling, abs(travel) >= ControlMetrics.tapSlop {
+                // Opens on the first step rather than the first movement:
+                // between the 6pt tap slop and the 14pt step it would
+                // otherwise sit on screen reading 0 with nothing lit.
+                if !isPulling, steps != 0 {
                     isPulling = true
                 }
             }
             .onEnded { value in
-                if abs(value.translation.height) < ControlMetrics.tapSlop,
+                if let onTap,
+                   abs(value.translation.height) < ControlMetrics.tapSlop,
                    abs(value.translation.width) < ControlMetrics.tapSlop {
-                    onTap?()
+                    onTap()
                     haptic.impactOccurred()
                 }
-                steppedTranslation = 0
-                steps = 0
-                isPulling = false
+                endPull()
             }
     }
 }
@@ -155,11 +184,11 @@ private struct PullTrack: View {
                     delta
                     // Spacers between the ticks rather than fixed gaps, so the
                     // strip fills whatever height it is given.
-                    ForEach(Array(ticks.reversed()), id: \.self) { index in
+                    ForEach(columnTicks.reversed(), id: \.self) { index in
                         Spacer(minLength: 3)
                         Capsule()
                             .fill(tint(for: index))
-                            .frame(width: passed(index) ? 30 : 16, height: 2)
+                            .frame(width: tickWidth(for: index), height: index == 0 ? 3 : 2)
                     }
                     Spacer(minLength: 3)
                 }
@@ -184,6 +213,7 @@ private struct PullTrack: View {
         }
         .glassPanel(cornerRadius: axis == .vertical ? 37 : 30)
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private var delta: some View {
@@ -195,12 +225,22 @@ private struct PullTrack: View {
 
     // MARK: Vertical ticks
 
-    private var ticks: [Int] { Array(0..<Self.tickCount) }
+    /// Centred on where the pull began, so filling upward and filling
+    /// downward look different — the direction is the whole point of a delta.
+    private var columnTicks: [Int] { Array(-7...7) }
 
-    private func passed(_ index: Int) -> Bool { index < abs(steps) }
+    private func inColumnRange(_ index: Int) -> Bool {
+        steps >= 0 ? (index > 0 && index <= steps) : (index < 0 && index >= steps)
+    }
+
+    private func tickWidth(for index: Int) -> CGFloat {
+        if index == 0 { return 34 }
+        return inColumnRange(index) ? 30 : 16
+    }
 
     private func tint(for index: Int) -> Color {
-        passed(index) ? .accentColor : Color.white.opacity(0.16)
+        if index == 0 { return Color.white.opacity(0.85) }
+        return inColumnRange(index) ? .accentColor : Color.white.opacity(0.35)
     }
 
     // MARK: Horizontal ticks — centred on where the drag began
@@ -214,7 +254,7 @@ private struct PullTrack: View {
 
     private func scrubTint(for index: Int) -> Color {
         if index == 0 { return Color.white.opacity(0.85) }
-        return inScrubRange(index) ? .accentColor : Color.white.opacity(0.16)
+        return inScrubRange(index) ? .accentColor : Color.white.opacity(0.35)
     }
 
     private func inScrubRange(_ index: Int) -> Bool {

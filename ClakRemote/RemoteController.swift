@@ -143,6 +143,9 @@ final class RemoteController {
 
     func sceneDidBecomeActive() {
         isBackgrounded = false
+        // Otherwise the idle clock counts the whole time spent away and a hint
+        // fires a second after returning, mid-reengagement.
+        noteInteraction()
         // Recover whatever discoverability iOS degraded while backgrounded
         if status != .connected {
             peripheral.startAdvertising()

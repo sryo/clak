@@ -73,6 +73,40 @@ final class TrackpadUIView: UIView {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
         backgroundColor = .clear
+        configureAccessibility()
+    }
+
+    /// Without this the surface is invisible to VoiceOver: nothing else lives
+    /// in the connected view, so the screen reads as empty. `allowsDirectInteraction`
+    /// is what lets raw touches through — otherwise VoiceOver eats them and the
+    /// pointer never moves. The clicks are also offered as actions, since
+    /// direct interaction is a hard gesture to discover.
+    private func configureAccessibility() {
+        isAccessibilityElement = true
+        accessibilityLabel = "Trackpad"
+        accessibilityHint = "Drag to move the pointer on your Mac. Tap to click, two fingers to scroll."
+        accessibilityTraits = [.allowsDirectInteraction]
+        accessibilityCustomActions = [
+            UIAccessibilityCustomAction(name: "Click") { [weak self] _ in
+                self?.controller?.mouseClick(button: 1)
+                return true
+            },
+            UIAccessibilityCustomAction(name: "Right click") { [weak self] _ in
+                self?.controller?.mouseClick(button: 2)
+                return true
+            },
+        ]
+    }
+
+    override func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool {
+        switch direction {
+        case .up: controller?.mouseScroll(wheel: -3)
+        case .down: controller?.mouseScroll(wheel: 3)
+        case .left: controller?.mouseScroll(wheel: 0, pan: -3)
+        case .right: controller?.mouseScroll(wheel: 0, pan: 3)
+        default: return false
+        }
+        return true
     }
 
     required init?(coder: NSCoder) {

@@ -20,6 +20,13 @@ final class KeyboardFocus {
     func setVisible(_ visible: Bool) {
         isVisible = visible
     }
+
+    /// Used when iOS takes the keyboard away without telling the field — it
+    /// stays first responder, so nothing else would clear typing mode.
+    func dismiss() {
+        view?.resignFirstResponder()
+        isVisible = false
+    }
 }
 
 /// Invisible text field that turns the iOS keyboard into a HID keystroke source.

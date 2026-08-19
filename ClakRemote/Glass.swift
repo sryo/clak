@@ -42,7 +42,9 @@ extension View {
 /// height or bar inset can't leave the two layers disagreeing.
 enum ControlMetrics {
     static let barInset: CGFloat = 16
-    static let barBottom: CGFloat = 44
+    /// Landscape has ~400pt of height in total, so 44pt of dead space below
+    /// the bar is 12% of it. The home-indicator inset already sits under this.
+    static func barBottom(compact: Bool) -> CGFloat { compact ? 12 : 44 }
     static let barRadius: CGFloat = 34
     /// Landscape on a phone leaves about 400pt of height for everything, so
     /// keys give some back rather than crowding out the trackpad.
@@ -62,4 +64,20 @@ enum ControlMetrics {
     static let pointsPerStep: CGFloat = 14
     /// Movement under this in both axes is a tap, not a pull.
     static let tapSlop: CGFloat = 6
+}
+
+/// Every key on the bar presses the same way: a brief dim and shrink, which is
+/// the feedback the flat glyph-on-glass keys had none of. Also carries the
+/// disabled appearance, so `.disabled()` looks disabled rather than identical.
+struct KeyPress: ButtonStyle {
+    var tint: Color?
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.primary))
+            .opacity(isEnabled ? (configuration.isPressed ? 0.45 : 1) : 0.3)
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.7), value: configuration.isPressed)
+    }
 }

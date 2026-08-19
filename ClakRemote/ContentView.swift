@@ -10,16 +10,22 @@ struct ContentView: View {
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    private var isCompact: Bool { verticalSizeClass == .compact }
 
     private var isConnected: Bool { controller.status == .connected }
 
-    private var idleClock: Publishers.Autoconnect<Timer.TimerPublisher> {
-        Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    }
+    @State private var idleClock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(spacing: 14) {
-            surface
+        VStack(spacing: isCompact ? 8 : 14) {
+            // In landscape the keyboard leaves about 200pt, which the bar and
+            // the echo already spend. Keeping the surface would give it a
+            // negative height and push the bar off the bottom.
+            if !(keyboardFocus.isVisible && isCompact) {
+                surface
+            }
 
             if keyboardFocus.isVisible, !controller.echo.isEmpty {
                 echo
@@ -36,18 +42,23 @@ struct ContentView: View {
                 isTyping: keyboardFocus.isVisible,
                 onToggleKeyboard: { keyboardFocus.toggle() }
             )
+            .frame(maxWidth: 520)
+            .frame(maxWidth: .infinity)
             .disabled(!isConnected)
-            .opacity(isConnected ? 1 : 0.35)
+            .opacity(isConnected ? 1 : 0.55)
+            .animation(.easeInOut(duration: 0.28), value: isConnected)
         }
         .padding(.horizontal, ControlMetrics.barInset)
         .padding(.top, 10)
-        .padding(.bottom, keyboardFocus.isVisible ? 8 : ControlMetrics.barBottom)
+        .padding(.bottom, keyboardFocus.isVisible ? 8 : ControlMetrics.barBottom(compact: isCompact))
         .background(Color.black)
         .preferredColorScheme(.dark)
         .overlay {
             KeyInputView(controller: controller, focus: keyboardFocus)
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
@@ -56,10 +67,14 @@ struct ContentView: View {
             if !visible { controller.clearEcho() }
             coach.cancel()
         }
+        .onChange(of: controller.hardwareKeyboardAttached) { _, attached in
+            if attached, keyboardFocus.isVisible { keyboardFocus.dismiss() }
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active: coach.sessionBegan()
-            default: coach.sessionEnded()
+            case .background: coach.sessionEnded()
+            default: coach.cancel()
             }
         }
         .onReceive(idleClock) { _ in
@@ -82,8 +97,13 @@ struct ContentView: View {
             if isConnected {
                 TrackpadView(controller: controller)
             } else {
-                WaitingView(controller: controller)
-                    .padding(.horizontal, 26)
+                ScrollView {
+                    WaitingView(controller: controller)
+                        .frame(maxWidth: 420)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 26)
+                        .padding(.vertical, 20)
+                }
             }
         }
         .frame(maxHeight: .infinity)
@@ -95,7 +115,7 @@ struct ContentView: View {
     private var echo: some View {
         Text(controller.echo)
             .font(.system(size: 20))
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
             .lineLimit(1)
             .truncationMode(.head)
             .frame(maxWidth: .infinity)
@@ -128,7 +148,7 @@ private struct WaitingView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Text("Keep this screen open — iOS hides Clak Remote from your Mac while the app is in the background.")
                     .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 4)

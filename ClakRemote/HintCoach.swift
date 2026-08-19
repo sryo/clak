@@ -140,6 +140,9 @@ final class HintCoach {
     }
 
     private func clear() {
+        // @Observable publishes even a nil-to-nil write, and this is called on
+        // every frame of a drag.
+        guard current != nil || clearTask != nil else { return }
         clearTask?.cancel()
         clearTask = nil
         current = nil
