@@ -34,6 +34,12 @@ enum ConsumerUsage {
     // QMK/Keychron-proven Mac mappings
     static let missionControl: UInt16 = 0x029F // AC Desktop Show All Windows
     static let spotlight: UInt16 = 0x0221      // AC Search
+    /// F5 on a Mac keyboard. Apple's own key is on its vendor page (0xFF01),
+    /// which macOS has filtered by vendor ID since Big Sur, so a third-party
+    /// keyboard can't send it. This is the standard Consumer equivalent and
+    /// needs no report-map change — our consumer report already covers
+    /// 0x000–0x3FF.
+    static let voiceCommand: UInt16 = 0x00CF
 }
 
 @Observable

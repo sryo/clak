@@ -307,15 +307,17 @@ struct ControlBar: View {
         }
     }
 
-    /// The main row is about the playback; this one is about the screen it is
-    /// playing on. Four keys, no duplicates of what a pull already does, and
-    /// nothing that depends on one particular player's shortcuts.
+    /// The Mac's function row. The main row holds what the Mac keyboard puts
+    /// on F1–F2 and F7–F12 (brightness, transport, volume); this holds the
+    /// rest of it — F3 Mission Control, F4 Spotlight, F5 dictation — plus
+    /// escape and fullscreen.
     private var mediaExtras: some View {
         HStack(spacing: 0) {
             word("esc") { controller.pressKey(HIDKey.escape) }
             key("arrow.up.left.and.arrow.down.right", size: 24) { controller.toggleFullscreen() }
             key("rectangle.3.group", size: 24) { controller.tapConsumer(ConsumerUsage.missionControl) }
             key("magnifyingglass", size: 24) { controller.tapConsumer(ConsumerUsage.spotlight) }
+            key("mic", size: 24) { controller.tapConsumer(ConsumerUsage.voiceCommand) }
         }
     }
 
