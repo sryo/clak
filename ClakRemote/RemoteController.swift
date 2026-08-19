@@ -183,6 +183,7 @@ final class RemoteController {
     // MARK: - Keyboard
 
     func type(text: String) {
+        noteEcho(text)
         var dropped = 0
         for character in text {
             guard let keystrokes = CharacterComposer.keystrokes(for: character) else {
@@ -206,6 +207,21 @@ final class RemoteController {
         pressKey(HIDKey.backspace)
     }
 
+    /// Seek by one player step. Deliberately arrow keys rather than a consumer
+    /// usage: every player binds these, and none agree on how many seconds a
+    /// step is worth — which is why nothing in the UI claims seconds.
+    func seek(_ direction: Int) {
+        pressKey(direction > 0 ? HIDKey.rightArrow : HIDKey.leftArrow)
+    }
+
+    func toggleFullscreen() {
+        type(text: "f")
+    }
+
+    func toggleCaptions() {
+        type(text: "c")
+    }
+
     func pressKey(_ keyCode: UInt8) {
         enqueueKeystroke(keyCode: keyCode, modifiers: consumeStickyModifiers())
     }
@@ -222,6 +238,31 @@ final class RemoteController {
         let modifiers = stickyModifiers
         stickyModifiers = 0
         return modifiers
+    }
+
+    // MARK: - Echo
+
+    /// The tail of what has been sent, so the on-screen keyboard can be used
+    /// without watching the Mac. Only ever read while typing.
+    private(set) var echo = ""
+
+    @ObservationIgnored
+    private var echoClearTask: DispatchWorkItem?
+    private let maxEcho = 64
+
+    private func noteEcho(_ text: String) {
+        echo = String((echo + text).suffix(maxEcho))
+        echoClearTask?.cancel()
+        let task = DispatchWorkItem { [weak self] in
+            self?.echo = ""
+        }
+        echoClearTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: task)
+    }
+
+    func clearEcho() {
+        echoClearTask?.cancel()
+        echo = ""
     }
 
     private func registerDroppedCharacters(_ count: Int) {
