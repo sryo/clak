@@ -63,36 +63,30 @@ struct ContentView: View {
     }
 }
 
-/// Waiting to be picked up. A real Large Title, two steps, and the caveats
-/// only where they apply.
+/// Waiting to be picked up. Built like the setup screens iOS shows for the
+/// same job: a title, a plain sentence saying what to do, and a spinner that
+/// says it's still looking. No illustration, no invented step chrome.
 private struct PairingView: View {
     let controller: RemoteController
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Ready to pair")
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Ready to Pair")
                 .font(.largeTitle.bold())
-            Text("Your Mac can see this iPhone as a keyboard.")
+
+            Text("On your Mac, open Settings ▸ Bluetooth and connect to Clak Remote, then confirm the request that appears here.")
                 .font(.body)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            status
+                .padding(.top, 4)
+
+            Text("Keep this screen open — iOS hides Clak Remote from your Mac while the app is in the background.")
+                .font(.subheadline)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 8)
-
-            Spacer()
-
-            AdvertisingMark()
-                .frame(maxWidth: .infinity)
-
-            Spacer()
-
-            VStack(alignment: .leading, spacing: 20) {
-                step(1, "On the Mac, open Settings ▸ Bluetooth and connect to Clak Remote.")
-                step(2, "Confirm the request that appears here.")
-            }
-
-            Text("Keep this screen open — iOS hides Clak Remote from the Mac while the app is in the background.")
-                .font(.footnote)
-                .foregroundStyle(.quaternary)
-                .padding(.top, 28)
 
             if controller.bluetoothPermissionDenied {
                 Button("Open Settings") {
@@ -101,69 +95,33 @@ private struct PairingView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .padding(.top, 20)
+                .padding(.top, 4)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 28)
+        .padding(.horizontal, 28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
-    private func step(_ number: Int, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            Text("\(number)")
-                .font(.system(size: 15, weight: .semibold))
-                .frame(width: 28, height: 28)
-                .background(Color.accentColor.opacity(0.15), in: Circle())
-                .foregroundStyle(.tint)
-            Text(text)
+    @ViewBuilder
+    private var status: some View {
+        switch controller.status {
+        case .error(let message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(.body)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        case .connected:
+            Label("Connected", systemImage: "checkmark.circle.fill")
+                .font(.body)
+                .foregroundStyle(.green)
+        case .advertising, .waitingForBluetooth:
+            HStack(spacing: 10) {
+                ProgressView()
+                Text(controller.status == .advertising ? "Waiting for your Mac…" : "Starting up…")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
 
-/// Concentric arcs standing in for the advertisement going out.
-private struct AdvertisingMark: View {
-    @State private var pulse = false
-
-    var body: some View {
-        ZStack {
-            ForEach(0..<3, id: \.self) { ring in
-                Arcs(inset: CGFloat(ring))
-                    .stroke(Color.accentColor.opacity(opacity(ring)), style: .init(lineWidth: 3 - CGFloat(ring) * 0.2, lineCap: .round))
-                    .scaleEffect(pulse ? 1.02 : 0.98)
-                    .animation(
-                        .easeInOut(duration: 1.6).repeatForever(autoreverses: true).delay(Double(ring) * 0.18),
-                        value: pulse
-                    )
-            }
-            Circle()
-                .fill(Color.accentColor)
-                .frame(width: 14, height: 14)
-        }
-        .frame(width: 150, height: 150)
-        .onAppear { pulse = true }
-    }
-
-    private func opacity(_ ring: Int) -> Double {
-        [1.0, 0.5, 0.18][ring]
-    }
-
-    private struct Arcs: Shape {
-        let inset: CGFloat
-
-        func path(in rect: CGRect) -> Path {
-            let centre = CGPoint(x: rect.midX, y: rect.midY)
-            let radius = 25 + inset * 20
-            var path = Path()
-            for start in [Angle(degrees: 120), Angle(degrees: -60)] {
-                path.addArc(
-                    center: centre, radius: radius,
-                    startAngle: start, endAngle: start + .degrees(120),
-                    clockwise: false
-                )
-                path.move(to: .zero)
-            }
-            return path
-        }
-    }
-}
