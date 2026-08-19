@@ -116,7 +116,7 @@ final class RemoteController {
     @ObservationIgnored
     private var republishCount = 0
     private let firstRepublishDelay: TimeInterval = 25
-    private let maxRepublishDelay: TimeInterval = 600
+    private let maxRepublishDelay: TimeInterval = 120
 
     @ObservationIgnored
     private var droppedNoteClearTask: DispatchWorkItem?
@@ -151,8 +151,18 @@ final class RemoteController {
         // Otherwise the idle clock counts the whole time spent away and a hint
         // fires a second after returning, mid-reengagement.
         noteInteraction()
-        // Recover whatever discoverability iOS degraded while backgrounded
-        if status != .connected {
+
+        // Ask the peripheral rather than trusting `status`: a link dropped
+        // while the app was suspended doesn't always arrive as an unsubscribe,
+        // and a stale "connected" would skip advertising entirely — the app
+        // then sits looking connected until it is force-quit.
+        if !peripheral.isConnected {
+            if status == .connected {
+                status = .waitingForBluetooth
+            }
+            // Opening the app is a fresh attempt, so recovery starts prompt
+            // again instead of inheriting a previous session's backoff.
+            republishCount = 0
             peripheral.startAdvertising()
         }
         syncRepublishTimer()
@@ -407,6 +417,7 @@ extension RemoteController: BLEHIDPeripheralDelegate {
         if status != .connected {
             status = .waitingForBluetooth
         }
+        syncRepublishTimer()
     }
 
     func peripheralDidConnect(central: CBCentral) {
@@ -422,6 +433,7 @@ extension RemoteController: BLEHIDPeripheralDelegate {
         stickyModifiers = 0
         capsLockOn = false
         peripheral.startAdvertising()
+        syncRepublishTimer()
     }
 
     func peripheralDidFail(_ failure: BLEHIDPeripheralManager.Failure) {

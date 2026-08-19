@@ -142,6 +142,10 @@ final class BLEHIDPeripheralManager: NSObject {
     private(set) var isPoweredOn = false
 
     var isAdvertising: Bool { lifecycle == .advertising }
+
+    /// Whether a central can actually receive input right now. The authority
+    /// on connectedness — a cached flag in a client can outlive the link.
+    var isConnected: Bool { hasConnectedCentral }
     var areServicesPublished: Bool { lifecycle == .published || lifecycle == .advertising }
 
     /// Delay between service adds. macOS CoreBluetooth needs generous settling
