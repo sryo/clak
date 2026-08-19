@@ -44,8 +44,15 @@ enum ControlMetrics {
     static let barInset: CGFloat = 16
     static let barBottom: CGFloat = 44
     static let barRadius: CGFloat = 34
-    static let keyHeight: CGFloat = 66
-    static let compactKeyHeight: CGFloat = 58
+    /// Landscape on a phone leaves about 400pt of height for everything, so
+    /// keys give some back rather than crowding out the trackpad.
+    static func keyHeight(compact: Bool) -> CGFloat {
+        compact ? 48 : 66
+    }
+
+    static func typingKeyHeight(compact: Bool) -> CGFloat {
+        compact ? 42 : 58
+    }
     static let grabberWidth: CGFloat = 40
     static let grabberHeight: CGFloat = 5
 

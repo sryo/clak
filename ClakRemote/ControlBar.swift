@@ -30,6 +30,7 @@ struct ControlBar: View {
     let onToggleKeyboard: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     /// Travel added by a peek, alongside the finger's own.
     @State private var peekOffset: CGFloat = 0
@@ -48,6 +49,10 @@ struct ControlBar: View {
     /// Vertical gap the expanded row adds: two 5pt VStack spacings and the
     /// divider between them.
     private static let expandedGap: CGFloat = 11
+
+    private var isCompact: Bool { verticalSizeClass == .compact }
+    private var keyHeight: CGFloat { ControlMetrics.keyHeight(compact: isCompact) }
+    private var typingKeyHeight: CGFloat { ControlMetrics.typingKeyHeight(compact: isCompact) }
 
     var body: some View {
         VStack(spacing: 5) {
@@ -128,7 +133,7 @@ struct ControlBar: View {
     }
 
     private var pagerHeight: CGFloat {
-        isExpanded ? ControlMetrics.keyHeight * 2 + Self.expandedGap : ControlMetrics.keyHeight
+        isExpanded ? keyHeight * 2 + Self.expandedGap : keyHeight
     }
 
     private func layerStack(_ which: ControlLayer) -> some View {
@@ -269,7 +274,7 @@ struct ControlBar: View {
             key("backward.fill", size: 28) { controller.tapConsumer(ConsumerUsage.previous) }
 
             // Tap plays or pauses; pulled sideways it becomes the scrubber.
-            PullKey(axis: .horizontal, unit: "skips", tug: pullTug) { step in
+            PullKey(axis: .horizontal, tug: pullTug) { step in
                 coach.markDiscovered(.pullKey)
                 controller.seek(step)
             } onTap: {
@@ -285,7 +290,7 @@ struct ControlBar: View {
 
             separator
 
-            PullKey(axis: .vertical, unit: "steps", tug: pullTug) { step in
+            PullKey(axis: .vertical, tug: pullTug) { step in
                 coach.markDiscovered(.pullKey)
                 controller.tapConsumer(step > 0 ? ConsumerUsage.brightnessUp : ConsumerUsage.brightnessDown)
             } label: {
@@ -294,7 +299,7 @@ struct ControlBar: View {
             .accessibilityLabel("Brightness")
             .accessibilityHint("Drag up or down to change")
 
-            PullKey(axis: .vertical, unit: "steps", tug: pullTug) { step in
+            PullKey(axis: .vertical, tug: pullTug) { step in
                 coach.markDiscovered(.pullKey)
                 controller.tapConsumer(step > 0 ? ConsumerUsage.volumeUp : ConsumerUsage.volumeDown)
             } onTap: {
@@ -354,23 +359,23 @@ struct ControlBar: View {
     private var typingComplement: some View {
         VStack(spacing: 4) {
             HStack(spacing: 0) {
-                word("esc", height: ControlMetrics.compactKeyHeight) { controller.pressKey(HIDKey.escape) }
-                key("arrow.left", size: 24, height: ControlMetrics.compactKeyHeight) { controller.pressKey(HIDKey.leftArrow) }
-                key("arrow.down", size: 24, height: ControlMetrics.compactKeyHeight) { controller.pressKey(HIDKey.downArrow) }
-                key("arrow.up", size: 24, height: ControlMetrics.compactKeyHeight) { controller.pressKey(HIDKey.upArrow) }
-                key("arrow.right", size: 24, height: ControlMetrics.compactKeyHeight) { controller.pressKey(HIDKey.rightArrow) }
-                key("keyboard.chevron.compact.down", size: 25, height: ControlMetrics.compactKeyHeight,
+                word("esc", height: typingKeyHeight) { controller.pressKey(HIDKey.escape) }
+                key("arrow.left", size: 24, height: typingKeyHeight) { controller.pressKey(HIDKey.leftArrow) }
+                key("arrow.down", size: 24, height: typingKeyHeight) { controller.pressKey(HIDKey.downArrow) }
+                key("arrow.up", size: 24, height: typingKeyHeight) { controller.pressKey(HIDKey.upArrow) }
+                key("arrow.right", size: 24, height: typingKeyHeight) { controller.pressKey(HIDKey.rightArrow) }
+                key("keyboard.chevron.compact.down", size: 25, height: typingKeyHeight,
                     tint: .accentColor, action: onToggleKeyboard)
             }
 
             Divider().overlay(Color.white.opacity(0.08)).padding(.horizontal, 12)
 
             HStack(spacing: 0) {
-                modifier("shift", HIDModifier.shift, height: ControlMetrics.compactKeyHeight)
-                modifier("control", HIDModifier.control, height: ControlMetrics.compactKeyHeight)
-                modifier("option", HIDModifier.option, height: ControlMetrics.compactKeyHeight)
-                modifier("command", HIDModifier.command, height: ControlMetrics.compactKeyHeight)
-                word("tab", height: ControlMetrics.compactKeyHeight) { controller.pressKey(HIDKey.tab) }
+                modifier("shift", HIDModifier.shift, height: typingKeyHeight)
+                modifier("control", HIDModifier.control, height: typingKeyHeight)
+                modifier("option", HIDModifier.option, height: typingKeyHeight)
+                modifier("command", HIDModifier.command, height: typingKeyHeight)
+                word("tab", height: typingKeyHeight) { controller.pressKey(HIDKey.tab) }
             }
         }
     }
@@ -386,14 +391,14 @@ struct ControlBar: View {
     private func key(
         _ systemName: String,
         size: CGFloat,
-        height: CGFloat = ControlMetrics.keyHeight,
+        height: CGFloat? = nil,
         tint: Color? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: size))
-                .frame(maxWidth: .infinity, minHeight: height)
+                .frame(maxWidth: .infinity, minHeight: height ?? keyHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -402,13 +407,13 @@ struct ControlBar: View {
 
     private func word(
         _ text: String,
-        height: CGFloat = ControlMetrics.keyHeight,
+        height: CGFloat? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Text(text)
                 .font(.system(size: 19, weight: .medium))
-                .frame(maxWidth: .infinity, minHeight: height)
+                .frame(maxWidth: .infinity, minHeight: height ?? keyHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -419,7 +424,7 @@ struct ControlBar: View {
     private func modifier(
         _ systemName: String,
         _ bit: UInt8,
-        height: CGFloat = ControlMetrics.keyHeight
+        height: CGFloat? = nil
     ) -> some View {
         let active = controller.isModifierActive(bit)
         return Button {
@@ -427,7 +432,7 @@ struct ControlBar: View {
         } label: {
             Image(systemName: systemName)
                 .font(.system(size: 27))
-                .frame(maxWidth: .infinity, minHeight: height)
+                .frame(maxWidth: .infinity, minHeight: height ?? keyHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

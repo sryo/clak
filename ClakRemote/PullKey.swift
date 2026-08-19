@@ -23,21 +23,17 @@ struct PullKey<Label: View>: View {
     /// Positive = up / right.
     let onStep: (Int) -> Void
     let onTap: (() -> Void)?
-    /// Shown beneath the delta while pulling ("steps", "skips").
-    let unit: String
     /// Offset applied by a hint, to show that this key gives when pulled.
     var tug: CGFloat = 0
 
     init(
         axis: PullAxis,
-        unit: String,
         tug: CGFloat = 0,
         onStep: @escaping (Int) -> Void,
         onTap: (() -> Void)? = nil,
         @ViewBuilder label: () -> Label
     ) {
         self.axis = axis
-        self.unit = unit
         self.tug = tug
         self.onStep = onStep
         self.onTap = onTap
@@ -47,7 +43,11 @@ struct PullKey<Label: View>: View {
     @State private var steppedTranslation: CGFloat = 0
     @State private var steps = 0
     @State private var isPulling = false
-    @Namespace private var glass
+    /// Distance from the top of the screen to the top of this key — how much
+    /// room a column has to grow into. Measured rather than assumed, because
+    /// in landscape the whole screen is shorter than a portrait column.
+    @State private var roomAbove: CGFloat = 400
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
@@ -62,21 +62,36 @@ struct PullKey<Label: View>: View {
                 .foregroundStyle(.tertiary)
         }
             .offset(x: axis == .horizontal ? tug : 0, y: axis == .vertical ? tug : 0)
-            .frame(maxWidth: .infinity, minHeight: ControlMetrics.keyHeight)
+            .frame(maxWidth: .infinity, minHeight: ControlMetrics.keyHeight(compact: isCompact))
             .contentShape(Rectangle())
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { roomAbove = geo.frame(in: .global).minY }
+                        .onChange(of: geo.frame(in: .global).minY) { _, top in roomAbove = top }
+                }
+            )
             // Both tracks rise clear of the key rather than sitting on it: a
             // key is only ~70pt wide, so anything drawn inside one is squeezed
             // and clipped. The vertical column grows out of the key; the
             // horizontal one floats just above it, still over the bar.
             .overlay(alignment: .bottom) {
                 if isPulling {
-                    PullTrack(axis: axis, steps: steps, unit: unit)
-                        .offset(y: axis == .horizontal ? -(ControlMetrics.keyHeight + 14) : 0)
+                    PullTrack(axis: axis, steps: steps, columnHeight: columnHeight)
+                        .offset(y: axis == .horizontal ? -(ControlMetrics.keyHeight(compact: isCompact) + 14) : 0)
                         .transition(.scale(scale: 0.2, anchor: .bottom).combined(with: .opacity))
                 }
             }
             .gesture(pull)
             .animation(.spring(response: 0.32, dampingFraction: 0.78), value: isPulling)
+    }
+
+    private var isCompact: Bool { verticalSizeClass == .compact }
+
+    /// Never taller than the space above the key, so rotating to landscape
+    /// shortens the column instead of running it off the screen.
+    private var columnHeight: CGFloat {
+        min(396, max(150, roomAbove - 24))
     }
 
     private var pull: some Gesture {
@@ -123,7 +138,7 @@ struct PullKey<Label: View>: View {
 private struct PullTrack: View {
     let axis: PullAxis
     let steps: Int
-    let unit: String
+    var columnHeight: CGFloat = 396
 
     private static let tickCount = 14
 
@@ -132,18 +147,18 @@ private struct PullTrack: View {
             if axis == .vertical {
                 VStack(spacing: 0) {
                     delta
-                    Spacer(minLength: 14)
-                    VStack(spacing: 7) {
-                        ForEach(Array(ticks.reversed()), id: \.self) { index in
-                            Capsule()
-                                .fill(tint(for: index))
-                                .frame(width: passed(index) ? 30 : 16, height: 2)
-                        }
+                    // Spacers between the ticks rather than fixed gaps, so the
+                    // strip fills whatever height it is given.
+                    ForEach(Array(ticks.reversed()), id: \.self) { index in
+                        Spacer(minLength: 3)
+                        Capsule()
+                            .fill(tint(for: index))
+                            .frame(width: passed(index) ? 30 : 16, height: 2)
                     }
-                    Spacer(minLength: 14)
+                    Spacer(minLength: 3)
                 }
                 .padding(.vertical, 18)
-                .frame(width: 74, height: 396, alignment: .top)
+                .frame(width: 74, height: columnHeight, alignment: .top)
             } else {
                 VStack(spacing: 10) {
                     delta
@@ -166,16 +181,10 @@ private struct PullTrack: View {
     }
 
     private var delta: some View {
-        VStack(spacing: 5) {
-            Text(steps > 0 ? "+\(steps)" : "\(steps)")
-                .font(.system(size: 40, weight: .semibold))
-                .monospacedDigit()
-                .kerning(-1)
-            Text(unit.uppercased())
-                .font(.system(size: 11, weight: .semibold))
-                .kerning(0.8)
-                .foregroundStyle(.tertiary)
-        }
+        Text(steps > 0 ? "+\(steps)" : "\(steps)")
+            .font(.system(size: 40, weight: .semibold))
+            .monospacedDigit()
+            .kerning(-1)
     }
 
     // MARK: Vertical ticks
