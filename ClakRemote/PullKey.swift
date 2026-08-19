@@ -64,22 +64,19 @@ struct PullKey<Label: View>: View {
             .offset(x: axis == .horizontal ? tug : 0, y: axis == .vertical ? tug : 0)
             .frame(maxWidth: .infinity, minHeight: ControlMetrics.keyHeight)
             .contentShape(Rectangle())
-            .overlay(alignment: overlayAlignment) {
+            // Both tracks rise clear of the key rather than sitting on it: a
+            // key is only ~70pt wide, so anything drawn inside one is squeezed
+            // and clipped. The vertical column grows out of the key; the
+            // horizontal one floats just above it, still over the bar.
+            .overlay(alignment: .bottom) {
                 if isPulling {
                     PullTrack(axis: axis, steps: steps, unit: unit)
-                        .transition(.scale(scale: 0.2, anchor: trackAnchor).combined(with: .opacity))
+                        .offset(y: axis == .horizontal ? -(ControlMetrics.keyHeight + 14) : 0)
+                        .transition(.scale(scale: 0.2, anchor: .bottom).combined(with: .opacity))
                 }
             }
             .gesture(pull)
             .animation(.spring(response: 0.32, dampingFraction: 0.78), value: isPulling)
-    }
-
-    private var overlayAlignment: Alignment {
-        axis == .vertical ? .bottom : .center
-    }
-
-    private var trackAnchor: UnitPoint {
-        axis == .vertical ? .bottom : .center
     }
 
     private var pull: some Gesture {
@@ -159,7 +156,9 @@ private struct PullTrack: View {
                     }
                 }
                 .padding(.vertical, 14)
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 18)
+                // Sized by its ticks, not by the key it came out of.
+                .fixedSize()
             }
         }
         .glassPanel(cornerRadius: axis == .vertical ? 37 : 30)

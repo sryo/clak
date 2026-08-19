@@ -156,17 +156,26 @@ struct ControlBar: View {
                 }
                 .foregroundStyle(.secondary)
                 .transition(.opacity)
-            } else {
-                // Lit while anything is still undiscovered: costs no space,
-                // always visible, and retires itself once everything is found.
+            } else if isTyping {
                 Capsule()
-                    .fill(coach.hasUnlearned ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.white.opacity(0.30)))
+                    .fill(Color.white.opacity(0.30))
                     .frame(width: ControlMetrics.grabberWidth, height: ControlMetrics.grabberHeight)
                     .transition(.opacity)
+            } else {
+                // The handle says which layer this is and that there is
+                // another — a page indicator that is still a grabber, so the
+                // second layer is permanently visible without painting
+                // anything or spending a line of space on it.
+                HStack(spacing: 4) {
+                    segment(active: layer == .media)
+                    segment(active: layer == .keys)
+                }
+                .transition(.opacity)
             }
         }
         .frame(height: ControlMetrics.grabberHeight)
         .animation(.easeInOut(duration: 0.22), value: wordsHint)
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: layer)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
@@ -183,6 +192,12 @@ struct ControlBar: View {
             .accessibilityAction(named: layer == .media ? "Switch to keys" : "Switch to media") {
                 layer = layer == .media ? .keys : .media
             }
+    }
+
+    private func segment(active: Bool) -> some View {
+        Capsule()
+            .fill(Color.white.opacity(active ? 0.5 : 0.22))
+            .frame(width: active ? 24 : 10, height: ControlMetrics.grabberHeight)
     }
 
     private var panelGesture: some Gesture {
