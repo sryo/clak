@@ -19,7 +19,7 @@ struct ContentView: View {
     @State private var idleClock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(spacing: isCompact ? 8 : 14) {
+        VStack(spacing: isCompact ? 8 : 10) {
             // In landscape the keyboard leaves about 200pt, which the bar and
             // the echo already spend. Keeping the surface would give it a
             // negative height and push the bar off the bottom.

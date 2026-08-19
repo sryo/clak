@@ -76,7 +76,7 @@ struct ControlBar: View {
                 layerPager
             }
         }
-        .padding(.top, 9)
+        .padding(.top, 6)
         .padding(.bottom, 6)
         .padding(.horizontal, 8)
         .glassPanel(cornerRadius: ControlMetrics.barRadius)
@@ -190,10 +190,14 @@ struct ControlBar: View {
             .frame(height: ControlMetrics.grabberHeight)
             .animation(.easeInOut(duration: 0.22), value: wordsHint)
             .animation(panelSpring, value: layer)
-            .padding(.vertical, 8)
-            // 21pt was the target for the two gestures that reach half the app.
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            // The touch target grows upward into dead space — the bar's own
+            // top padding and the gap above it — instead of pushing the handle
+            // down the panel. Reclaimed immediately, so it costs no layout.
+            .padding(.top, 16)
             .contentShape(Rectangle())
+            .padding(.top, -16)
             .gesture(panelGesture)
     }
 
