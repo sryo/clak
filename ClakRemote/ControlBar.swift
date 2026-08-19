@@ -307,14 +307,15 @@ struct ControlBar: View {
         }
     }
 
+    /// The main row is about the playback; this one is about the screen it is
+    /// playing on. Four keys, no duplicates of what a pull already does, and
+    /// nothing that depends on one particular player's shortcuts.
     private var mediaExtras: some View {
         HStack(spacing: 0) {
             word("esc") { controller.pressKey(HIDKey.escape) }
             key("arrow.up.left.and.arrow.down.right", size: 24) { controller.toggleFullscreen() }
-            key("captions.bubble", size: 24) { controller.toggleCaptions() }
-            separator
-            key("arrow.left", size: 24) { controller.seek(-1) }
-            key("arrow.right", size: 24) { controller.seek(1) }
+            key("rectangle.3.group", size: 24) { controller.tapConsumer(ConsumerUsage.missionControl) }
+            key("magnifyingglass", size: 24) { controller.tapConsumer(ConsumerUsage.spotlight) }
         }
     }
 

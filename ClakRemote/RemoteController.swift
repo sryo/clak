@@ -214,12 +214,10 @@ final class RemoteController {
         pressKey(direction > 0 ? HIDKey.rightArrow : HIDKey.leftArrow)
     }
 
+    /// The letter every streaming player agrees on. Not a system shortcut —
+    /// ⌃⌘F would fullscreen the browser window rather than the video.
     func toggleFullscreen() {
         type(text: "f")
-    }
-
-    func toggleCaptions() {
-        type(text: "c")
     }
 
     func pressKey(_ keyCode: UInt8) {
