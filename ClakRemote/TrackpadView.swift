@@ -2,7 +2,8 @@ import SwiftUI
 import UIKit
 
 /// Touch surface driving the Mac cursor: 1-finger drag moves, tap clicks,
-/// 2-finger drag scrolls (with fling momentum), 2-finger tap right-clicks.
+/// 2-finger drag scrolls (with fling momentum), 2-finger tap right-clicks,
+/// and tap-then-press-and-move drags with the button held.
 struct TrackpadView: UIViewRepresentable {
     let controller: RemoteController
 
@@ -47,6 +48,20 @@ final class TrackpadUIView: UIView {
     private var lastMomentumTimestamp: TimeInterval = 0
 
     private static let tapMaxDuration: TimeInterval = 0.3
+
+    // Tap-and-a-half: tap, then press and move. The same drag a Mac trackpad
+    // performs with "Enable dragging" turned on, so it needs no learning.
+    private var isDragging = false
+    private var lastTapEnd: TimeInterval = 0
+    private var dragReleaseWork: DispatchWorkItem?
+    /// How soon after a tap a press counts as the drag half of it.
+    private static let dragArmWindow: TimeInterval = 0.35
+    /// A drag survives lifts shorter than this, so the pointer can be
+    /// repositioned and the drag continued — the phone's surface is far
+    /// smaller than the screen it drives. Longer than this and it drops.
+    private static let dragClutchGrace: TimeInterval = 0.4
+    private let dragHaptic = UIImpactFeedbackGenerator(style: .medium)
+    private let dropHaptic = UIImpactFeedbackGenerator(style: .light)
     private static let pointsPerScrollLine: CGFloat = 10
 
     // Velocity-based pointer acceleration: slow strokes get sub-1x gain for
@@ -73,6 +88,8 @@ final class TrackpadUIView: UIView {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
         backgroundColor = .clear
+        dragHaptic.prepare()
+        dropHaptic.prepare()
         configureAccessibility()
     }
 
@@ -93,6 +110,14 @@ final class TrackpadUIView: UIView {
             },
             UIAccessibilityCustomAction(name: "Right click") { [weak self] _ in
                 self?.controller?.mouseClick(button: 2)
+                return true
+            },
+            UIAccessibilityCustomAction(name: "Start drag") { [weak self] _ in
+                self?.beginDrag()
+                return true
+            },
+            UIAccessibilityCustomAction(name: "Drop") { [weak self] _ in
+                self?.endDrag()
                 return true
             },
         ]
@@ -117,6 +142,7 @@ final class TrackpadUIView: UIView {
         super.willMove(toWindow: newWindow)
         if newWindow == nil {
             cancelMomentum()
+            endDrag()
         }
     }
 
@@ -132,6 +158,16 @@ final class TrackpadUIView: UIView {
             scrollAccX = 0
             scrollAccY = 0
             lastTouchTimestamp = touches.first?.timestamp ?? 0
+        }
+        if activeTouches.isEmpty {
+            let now = ProcessInfo.processInfo.systemUptime
+            if isDragging {
+                // Coming back mid-clutch: keep the button down.
+                dragReleaseWork?.cancel()
+                dragReleaseWork = nil
+            } else if now - lastTapEnd < Self.dragArmWindow {
+                beginDrag()
+            }
         }
         activeTouches.formUnion(touches)
         if activeTouches.count >= 2, sessionMaxTouches < 2 {
@@ -188,16 +224,51 @@ final class TrackpadUIView: UIView {
         guard activeTouches.isEmpty else { return }
         flushPending()
 
-        let duration = ProcessInfo.processInfo.systemUptime - sessionStart
+        let now = ProcessInfo.processInfo.systemUptime
+        let duration = now - sessionStart
+
+        if isDragging {
+            scheduleDrop()
+            return
+        }
+
         if dragDistance < Constants.Trackpad.tapThreshold && duration < Self.tapMaxDuration {
             // 1-finger tap = left click, 2-finger tap = right click
             controller?.mouseClick(button: sessionMaxTouches >= 2 ? 0x02 : 0x01)
+            // Only a one-finger tap can be the first half of a drag.
+            lastTapEnd = sessionMaxTouches >= 2 ? 0 : now
             return
         }
 
         if sessionMaxTouches >= 2 {
             startMomentumIfFlung(liftTimestamp: touches.first?.timestamp ?? 0)
         }
+    }
+
+    // MARK: - Drag
+
+    private func beginDrag() {
+        isDragging = true
+        lastTapEnd = 0
+        controller?.mouseDown(button: 0x01)
+        dragHaptic.impactOccurred()
+    }
+
+    /// Held through a brief lift so the finger can be repositioned.
+    private func scheduleDrop() {
+        dragReleaseWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.endDrag() }
+        dragReleaseWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.dragClutchGrace, execute: work)
+    }
+
+    func endDrag() {
+        dragReleaseWork?.cancel()
+        dragReleaseWork = nil
+        guard isDragging else { return }
+        isDragging = false
+        controller?.mouseUp()
+        dropHaptic.impactOccurred()
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {

@@ -337,14 +337,33 @@ final class RemoteController {
 
     // MARK: - Mouse
 
+    /// Buttons currently held down, so every move made during a drag carries
+    /// them. Without this the button could only ever be tapped, which is why
+    /// dragging a file was impossible.
+    @ObservationIgnored
+    private(set) var heldMouseButtons: UInt8 = 0
+
     func mouseMove(dx: Int8, dy: Int8) {
         noteInteraction()
-        peripheral.sendMouseReport(buttons: 0, dx: dx, dy: dy, wheel: 0)
+        peripheral.sendMouseReport(buttons: heldMouseButtons, dx: dx, dy: dy, wheel: 0)
+    }
+
+    func mouseDown(button: UInt8) {
+        noteInteraction()
+        heldMouseButtons |= button
+        peripheral.sendMouseReport(buttons: heldMouseButtons, dx: 0, dy: 0, wheel: 0)
+    }
+
+    func mouseUp() {
+        guard heldMouseButtons != 0 else { return }
+        noteInteraction()
+        heldMouseButtons = 0
+        peripheral.sendMouseReport(buttons: 0, dx: 0, dy: 0, wheel: 0)
     }
 
     func mouseScroll(wheel: Int8, pan: Int8 = 0) {
         noteInteraction()
-        peripheral.sendMouseReport(buttons: 0, dx: 0, dy: 0, wheel: wheel, pan: pan)
+        peripheral.sendMouseReport(buttons: heldMouseButtons, dx: 0, dy: 0, wheel: wheel, pan: pan)
     }
 
     /// Clicks consume sticky modifiers and hold them across the click, so
@@ -392,6 +411,7 @@ extension RemoteController: BLEHIDPeripheralDelegate {
 
     func peripheralDidDisconnect(central: CBCentral) {
         status = .waitingForBluetooth
+        heldMouseButtons = 0
         sendQueue.removeAll()
         stickyModifiers = 0
         capsLockOn = false
