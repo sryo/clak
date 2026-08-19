@@ -25,16 +25,22 @@ struct PullKey<Label: View>: View {
     let onTap: (() -> Void)?
     /// Offset applied by a hint, to show that this key gives when pulled.
     var tug: CGFloat = 0
+    /// Where the grown track hangs from. A key at the edge of the bar anchors
+    /// its column to that edge, since a centred one would be cut off by the
+    /// pager's clip.
+    var trackAlignment: Alignment = .bottom
 
     init(
         axis: PullAxis,
         tug: CGFloat = 0,
+        trackAlignment: Alignment = .bottom,
         onStep: @escaping (Int) -> Void,
         onTap: (() -> Void)? = nil,
         @ViewBuilder label: () -> Label
     ) {
         self.axis = axis
         self.tug = tug
+        self.trackAlignment = trackAlignment
         self.onStep = onStep
         self.onTap = onTap
         self.label = label()
@@ -75,7 +81,7 @@ struct PullKey<Label: View>: View {
             // key is only ~70pt wide, so anything drawn inside one is squeezed
             // and clipped. The vertical column grows out of the key; the
             // horizontal one floats just above it, still over the bar.
-            .overlay(alignment: .bottom) {
+            .overlay(alignment: trackAlignment) {
                 if isPulling {
                     PullTrack(axis: axis, steps: steps, columnHeight: columnHeight)
                         .offset(y: axis == .horizontal ? -(ControlMetrics.keyHeight(compact: isCompact) + 14) : 0)

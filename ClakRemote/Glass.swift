@@ -50,8 +50,10 @@ enum ControlMetrics {
         compact ? 48 : 66
     }
 
+    /// 44 is the floor, not a suggestion: it is Apple's minimum touch target,
+    /// and the landscape value was under it.
     static func typingKeyHeight(compact: Bool) -> CGFloat {
-        compact ? 42 : 58
+        compact ? 44 : 58
     }
     static let grabberWidth: CGFloat = 40
     static let grabberHeight: CGFloat = 5

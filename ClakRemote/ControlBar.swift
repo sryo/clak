@@ -299,7 +299,7 @@ struct ControlBar: View {
             .accessibilityLabel("Brightness")
             .accessibilityHint("Drag up or down to change")
 
-            PullKey(axis: .vertical, tug: pullTug) { step in
+            PullKey(axis: .vertical, tug: pullTug, trackAlignment: .bottomTrailing) { step in
                 coach.markDiscovered(.pullKey)
                 controller.tapConsumer(step > 0 ? ConsumerUsage.volumeUp : ConsumerUsage.volumeDown)
             } onTap: {
