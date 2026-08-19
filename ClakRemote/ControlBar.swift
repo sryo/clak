@@ -6,6 +6,15 @@ enum ControlLayer {
     case keys
 }
 
+/// Clips the layer pager horizontally while leaving it open above, so the
+/// neighbouring layer stays hidden but a pulled key can still grow out of the
+/// bar.
+private struct SidewaysClip: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path(CGRect(x: rect.minX, y: rect.minY - 1200, width: rect.width, height: rect.height + 1200))
+    }
+}
+
 /// The control layer: one piece of glass floating over the trackpad.
 ///
 /// The grammar is one rule — touch a key and you get the key, touch the
@@ -21,6 +30,17 @@ struct ControlBar: View {
 
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
 
+    /// Live horizontal travel of the layer pager while the handle is dragged.
+    @State private var dragOffset: CGFloat = 0
+    @State private var barWidth: CGFloat = 0
+    /// Locked on the first meaningful movement so one drag can't both switch
+    /// layer and expand the panel.
+    @State private var gestureAxis: PullAxis?
+
+    /// Vertical gap the expanded row adds: two 5pt VStack spacings and the
+    /// divider between them.
+    private static let expandedGap: CGFloat = 11
+
     var body: some View {
         VStack(spacing: 5) {
             grabber
@@ -28,11 +48,7 @@ struct ControlBar: View {
             if isTyping {
                 typingComplement
             } else {
-                if isExpanded {
-                    expandedRow
-                    Divider().overlay(Color.white.opacity(0.08)).padding(.horizontal, 12)
-                }
-                mainRow
+                layerPager
             }
         }
         .padding(.top, 9)
@@ -41,8 +57,45 @@ struct ControlBar: View {
         .glassPanel(cornerRadius: ControlMetrics.barRadius)
         .glassGroup()
         .animation(.spring(response: 0.34, dampingFraction: 0.82), value: isExpanded)
-        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: layer)
         .animation(.spring(response: 0.34, dampingFraction: 0.82), value: isTyping)
+    }
+
+    // MARK: - Layer pager
+
+    /// Both layers sit side by side and travel under the thumb, so a swipe
+    /// reveals where it is going and can be walked back before it commits.
+    private var layerPager: some View {
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                layerStack(.media).frame(width: geo.size.width)
+                layerStack(.keys).frame(width: geo.size.width)
+            }
+            .offset(x: -layerIndex * geo.size.width + dragOffset)
+            .onAppear { barWidth = geo.size.width }
+            .onChange(of: geo.size.width) { _, width in barWidth = width }
+        }
+        .frame(height: pagerHeight)
+        // Clips sideways only: a pulled key grows far above the bar and must
+        // not be cut off by the pager's bounds.
+        .clipShape(SidewaysClip())
+    }
+
+    private var layerIndex: CGFloat {
+        layer == .media ? 0 : 1
+    }
+
+    private var pagerHeight: CGFloat {
+        isExpanded ? ControlMetrics.keyHeight * 2 + Self.expandedGap : ControlMetrics.keyHeight
+    }
+
+    private func layerStack(_ which: ControlLayer) -> some View {
+        VStack(spacing: 5) {
+            if isExpanded {
+                extras(for: which)
+                Divider().overlay(Color.white.opacity(0.08)).padding(.horizontal, 12)
+            }
+            main(for: which)
+        }
     }
 
     // MARK: - Handle
@@ -70,36 +123,61 @@ struct ControlBar: View {
     }
 
     private var panelGesture: some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onEnded { value in
-                let horizontal = value.translation.width
-                let vertical = value.translation.height
-
-                if abs(horizontal) > abs(vertical) {
-                    guard abs(horizontal) > 24 else { return }
-                    layer = layer == .media ? .keys : .media
-                    isExpanded = false
-                } else {
-                    guard abs(vertical) > 20 else { return }
-                    isExpanded = vertical < 0
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                if gestureAxis == nil {
+                    gestureAxis = abs(value.translation.width) > abs(value.translation.height)
+                        ? .horizontal : .vertical
                 }
-                haptic.impactOccurred()
+                if gestureAxis == .horizontal {
+                    dragOffset = resisted(value.translation.width)
+                }
             }
+            .onEnded { value in
+                defer { gestureAxis = nil }
+
+                if gestureAxis == .horizontal {
+                    // Judge on where the flick was heading, not where it
+                    // stopped, so a fast short swipe still commits.
+                    let projected = value.predictedEndTranslation.width
+                    let target: ControlLayer? = projected < 0 ? .keys : .media
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                        if abs(projected) > max(barWidth * 0.3, 40), let target, target != layer {
+                            layer = target
+                            isExpanded = false
+                            haptic.impactOccurred()
+                        }
+                        dragOffset = 0
+                    }
+                } else {
+                    guard abs(value.translation.height) > 20 else { return }
+                    isExpanded = value.translation.height < 0
+                    haptic.impactOccurred()
+                }
+            }
+    }
+
+    /// Pulling past the first or last layer meets resistance rather than empty
+    /// space, so the end of the set is felt instead of guessed at.
+    private func resisted(_ travel: CGFloat) -> CGFloat {
+        let pullingPastStart = layer == .media && travel > 0
+        let pullingPastEnd = layer == .keys && travel < 0
+        return (pullingPastStart || pullingPastEnd) ? travel / 3 : travel
     }
 
     // MARK: - Rows
 
     @ViewBuilder
-    private var mainRow: some View {
-        switch layer {
+    private func main(for which: ControlLayer) -> some View {
+        switch which {
         case .media: mediaRow
         case .keys: keysRow
         }
     }
 
     @ViewBuilder
-    private var expandedRow: some View {
-        switch layer {
+    private func extras(for which: ControlLayer) -> some View {
+        switch which {
         case .media: mediaExtras
         case .keys: keysExtras
         }
