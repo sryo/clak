@@ -1,83 +1,164 @@
+import Combine
 import SwiftUI
 
 struct ContentView: View {
     let controller: RemoteController
     @State private var keyboardFocus = KeyboardFocus()
+    @State private var layer: ControlLayer = .media
+    @State private var isExpanded = false
+    @State private var coach = HintCoach()
+
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    private var isCompact: Bool { verticalSizeClass == .compact }
+
+    private var isConnected: Bool { controller.status == .connected }
+
+    @State private var idleClock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(spacing: 12) {
-            statusBar
-
-            if controller.status == .connected {
-                trackpad
-                functionRow
-                specialKeysRow
-                bottomRow
-                if controller.droppedCharacterCount > 0 {
-                    Label(
-                        "\(controller.droppedCharacterCount) character\(controller.droppedCharacterCount == 1 ? "" : "s") couldn't be sent — only text typeable on a US-layout keyboard reaches the Mac.",
-                        systemImage: "character.cursor.ibeam"
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                }
-                if controller.hardwareKeyboardAttached {
-                    Label(
-                        "iOS hides the on-screen keyboard while a Bluetooth keyboard is connected to this iPhone — disconnect it (e.g. Clak) in Settings → Bluetooth.",
-                        systemImage: "keyboard.badge.ellipsis"
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                }
-            } else {
-                Spacer()
-                pairingHint
-                Spacer()
+        VStack(spacing: isCompact ? 8 : 10) {
+            // No trackpad while typing in landscape: the keyboard leaves too
+            // little height for the surface to be worth anything, and forcing
+            // it in pushes the bar off the bottom of the screen.
+            if !(keyboardFocus.isVisible && isCompact) {
+                surface
             }
 
+            if keyboardFocus.isVisible, !controller.echo.isEmpty {
+                echo
+            }
+
+            // Always present, inert until there's something to send: the
+            // layout never jumps, so where things live is learned during the
+            // wait rather than at the moment of connecting.
+            ControlBar(
+                controller: controller,
+                coach: coach,
+                layer: $layer,
+                isExpanded: $isExpanded,
+                isTyping: keyboardFocus.isVisible,
+                onToggleKeyboard: { keyboardFocus.toggle() }
+            )
+            .frame(maxWidth: 520)
+            .frame(maxWidth: .infinity)
+            .disabled(!isConnected)
+            .opacity(isConnected ? 1 : 0.55)
+            .animation(.easeInOut(duration: 0.28), value: isConnected)
+        }
+        .padding(.horizontal, ControlMetrics.barInset)
+        .padding(.top, 10)
+        .padding(.bottom, keyboardFocus.isVisible ? 8 : ControlMetrics.barBottom(compact: isCompact))
+        .background(Color.black)
+        .preferredColorScheme(.dark)
+        .overlay {
+            // Barely rendered rather than hidden: a field at zero opacity, or
+            // behind .hidden(), can't reliably hold first responder, and this
+            // one is what turns the system keyboard into keystrokes.
             KeyInputView(controller: controller, focus: keyboardFocus)
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
         }
-        .padding()
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
         }
-    }
-
-    // MARK: - Sections
-
-    private var statusBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: statusSymbol)
-                .foregroundStyle(statusColor)
-            Text(controller.status.label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-            if controller.capsLockOn {
-                Image(systemName: "capslock.fill")
-                    .foregroundStyle(.orange)
+        .onChange(of: keyboardFocus.isVisible) { _, visible in
+            if !visible { controller.clearEcho() }
+            coach.cancel()
+        }
+        .onChange(of: controller.hardwareKeyboardAttached) { _, attached in
+            if attached, keyboardFocus.isVisible { keyboardFocus.dismiss() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active: coach.sessionBegan()
+            default: coach.cancel()
             }
         }
-        .padding(.horizontal, 4)
+        .onReceive(idleClock) { _ in
+            guard isConnected, !keyboardFocus.isVisible else { return }
+            coach.tick(
+                idleFor: Date().timeIntervalSince(controller.lastInteraction),
+                reduceMotion: reduceMotion
+            )
+        }
     }
 
-    private var pairingHint: some View {
-        VStack(spacing: 16) {
-            Image(systemName: statusSymbol)
-                .font(.system(size: 44))
-                .foregroundStyle(statusColor)
-            Text("On your Mac: System Settings → Bluetooth → connect to “Clak Remote”, then confirm the pairing request here.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-            Text("Keep this screen open while pairing — iOS hides “Clak Remote” from the Mac's Bluetooth list while the app is in the background or the phone is locked.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
+    /// The touch surface, bounded so it reads as somewhere to put a thumb.
+    /// While there's nothing to touch it carries the connection status
+    /// instead — empty means ready.
+    private var surface: some View {
+        ZStack {
+            surfaceShape.fill(Color(uiColor: .secondarySystemBackground))
+
+            if isConnected {
+                TrackpadView(controller: controller)
+            } else {
+                ScrollView {
+                    WaitingView(controller: controller)
+                        .frame(maxWidth: 420)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 26)
+                        .padding(.vertical, 20)
+                }
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .clipShape(surfaceShape)
+    }
+
+    private var surfaceShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: ControlMetrics.surfaceRadius, style: .continuous)
+    }
+
+    /// What has gone out, so the phone can be typed on without watching the
+    /// Mac. Exists only while the system keyboard is up.
+    private var echo: some View {
+        Text(controller.echo)
+            .font(.system(size: 20))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.head)
+            .frame(maxWidth: .infinity)
+            .transition(.opacity)
+    }
+}
+
+/// Shown inside the surface while no Mac has picked us up.
+private struct WaitingView: View {
+    let controller: RemoteController
+
+    var body: some View {
+        VStack(spacing: 14) {
+            switch controller.status {
+            case .error(let message):
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.orange)
+                Text(message)
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+            default:
+                ProgressView()
+                Text(controller.status == .advertising ? "Waiting for your Mac" : "Starting up")
+                    .font(.title3.weight(.semibold))
+                Text("On your Mac, open Settings ▸ Bluetooth and connect to Clak Remote, then confirm the request that appears here.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Keep this screen open — iOS hides Clak Remote from your Mac while the app is in the background.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
+
             if controller.bluetoothPermissionDenied {
                 Button("Open Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -85,212 +166,8 @@ struct ContentView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .padding(.top, 6)
             }
         }
-    }
-
-    private var trackpad: some View {
-        TrackpadView(controller: controller)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
-            )
-            .overlay(alignment: .bottom) {
-                Text("drag · tap · 2-finger scroll")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .padding(.bottom, 8)
-                    .allowsHitTesting(false)
-            }
-    }
-
-    private var specialKeysRow: some View {
-        HStack(spacing: 8) {
-            keyButton("escape") { controller.pressKey(HIDKey.escape) }
-            keyButton("arrow.right.to.line") { controller.pressKey(HIDKey.tab) }
-            keyButton("return") { controller.pressKey(HIDKey.returnKey) }
-            keyButton("arrow.left") { controller.pressKey(HIDKey.leftArrow) }
-            keyButton("arrow.down") { controller.pressKey(HIDKey.downArrow) }
-            keyButton("arrow.up") { controller.pressKey(HIDKey.upArrow) }
-            keyButton("arrow.right") { controller.pressKey(HIDKey.rightArrow) }
-        }
-    }
-
-    private var bottomRow: some View {
-        HStack(spacing: 8) {
-            modifierToggle("shift", HIDModifier.shift)
-            modifierToggle("control", HIDModifier.control)
-            modifierToggle("option", HIDModifier.option)
-            modifierToggle("command", HIDModifier.command)
-            keyButton("delete.backward") { controller.deleteBackward() }
-            keyboardToggle
-        }
-    }
-
-    /// Mac-keyboard-style function row. Brightness and volume are drag-keys:
-    /// drag up/down to step; tap on volume = mute.
-    private var functionRow: some View {
-        HStack(spacing: 4) {
-            DragStepKey(
-                systemName: "sun.max.fill",
-                onStepUp: { controller.tapConsumer(ConsumerUsage.brightnessUp) },
-                onStepDown: { controller.tapConsumer(ConsumerUsage.brightnessDown) },
-                onTap: nil
-            )
-            functionKey("rectangle.3.group") { controller.tapConsumer(ConsumerUsage.missionControl) }
-            functionKey("magnifyingglass") { controller.tapConsumer(ConsumerUsage.spotlight) }
-            functionKey("backward.fill") { controller.tapConsumer(ConsumerUsage.previous) }
-            functionKey("playpause.fill") { controller.tapConsumer(ConsumerUsage.playPause) }
-            functionKey("forward.fill") { controller.tapConsumer(ConsumerUsage.next) }
-            DragStepKey(
-                systemName: "speaker.wave.2.fill",
-                onStepUp: { controller.tapConsumer(ConsumerUsage.volumeUp) },
-                onStepDown: { controller.tapConsumer(ConsumerUsage.volumeDown) },
-                onTap: { controller.tapConsumer(ConsumerUsage.mute) }
-            )
-        }
-    }
-
-    private func functionKey(_ systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.footnote)
-        }
-        .buttonStyle(KeyCapStyle(minHeight: 32))
-    }
-
-    private var keyboardToggle: some View {
-        Button {
-            keyboardFocus.toggle()
-        } label: {
-            Image(systemName: keyboardFocus.isVisible ? "keyboard.chevron.compact.down" : "keyboard")
-        }
-        .buttonStyle(KeyCapStyle(prominent: true))
-        // iOS won't show the on-screen keyboard while a Bluetooth keyboard is attached
-        .disabled(controller.hardwareKeyboardAttached)
-    }
-
-    // MARK: - Building blocks
-
-    private func keyButton(_ systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-        }
-        .buttonStyle(KeyCapStyle())
-    }
-
-    private func modifierToggle(_ systemName: String, _ bit: UInt8) -> some View {
-        Button {
-            controller.toggleModifier(bit)
-        } label: {
-            Image(systemName: systemName)
-        }
-        .buttonStyle(KeyCapStyle(isOn: controller.isModifierActive(bit)))
-    }
-
-    private var statusSymbol: String {
-        switch controller.status {
-        case .waitingForBluetooth: "antenna.radiowaves.left.and.right.slash"
-        case .advertising: "antenna.radiowaves.left.and.right"
-        case .connected: "keyboard.fill"
-        case .error: "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var statusColor: Color {
-        switch controller.status {
-        case .waitingForBluetooth: .secondary
-        case .advertising: .blue
-        case .connected: .green
-        case .error: .red
-        }
-    }
-}
-
-/// Single visual language for every keycap: same radius and fills across
-/// plain keys, sticky modifiers (isOn), and the prominent keyboard button.
-private struct KeyCapStyle: ButtonStyle {
-    var minHeight: CGFloat = 40
-    var isOn = false
-    var prominent = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .frame(maxWidth: .infinity, minHeight: minHeight)
-            .foregroundStyle(prominent ? AnyShapeStyle(.white) : AnyShapeStyle(.tint))
-            .background(
-                background(pressed: configuration.isPressed),
-                in: RoundedRectangle(cornerRadius: 8)
-            )
-    }
-
-    private func background(pressed: Bool) -> Color {
-        if prominent {
-            return Color.accentColor.opacity(pressed ? 0.7 : 1)
-        }
-        if isOn {
-            return Color.accentColor.opacity(pressed ? 0.45 : 0.3)
-        }
-        return Color(uiColor: pressed ? .systemFill : .secondarySystemFill)
-    }
-}
-
-/// A function-row key that steps a value by vertical drag (up = increase),
-/// with a haptic tick per step. An optional plain tap fires `onTap`.
-private struct DragStepKey: View {
-    let systemName: String
-    let onStepUp: () -> Void
-    let onStepDown: () -> Void
-    let onTap: (() -> Void)?
-
-    private static let pointsPerStep: CGFloat = 14
-    private static let tapSlop: CGFloat = 6
-
-    @State private var steppedTranslation: CGFloat = 0
-    @State private var isActive = false
-    private let haptic = UIImpactFeedbackGenerator(style: .light)
-
-    var body: some View {
-        HStack(spacing: 2) {
-            Image(systemName: systemName)
-                .font(.footnote)
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 7))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, minHeight: 32)
-        .foregroundStyle(.tint)
-        .background(
-            Color(uiColor: isActive ? .systemFill : .secondarySystemFill),
-            in: RoundedRectangle(cornerRadius: 8)
-        )
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    isActive = true
-                    // Drag up = negative height = step up
-                    while value.translation.height - steppedTranslation <= -Self.pointsPerStep {
-                        steppedTranslation -= Self.pointsPerStep
-                        onStepUp()
-                        haptic.impactOccurred()
-                    }
-                    while value.translation.height - steppedTranslation >= Self.pointsPerStep {
-                        steppedTranslation += Self.pointsPerStep
-                        onStepDown()
-                        haptic.impactOccurred()
-                    }
-                }
-                .onEnded { value in
-                    isActive = false
-                    if abs(value.translation.height) < Self.tapSlop,
-                       abs(value.translation.width) < Self.tapSlop {
-                        onTap?()
-                        haptic.impactOccurred()
-                    }
-                    steppedTranslation = 0
-                }
-        )
     }
 }

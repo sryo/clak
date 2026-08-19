@@ -15,6 +15,11 @@ enum HIDKey {
     static let upArrow: UInt8 = 0x52
 }
 
+enum MouseButton {
+    static let left: UInt8 = 0x01
+    static let right: UInt8 = 0x02
+}
+
 enum HIDModifier {
     static let control: UInt8 = 0x01
     static let shift: UInt8 = 0x02
@@ -34,6 +39,12 @@ enum ConsumerUsage {
     // QMK/Keychron-proven Mac mappings
     static let missionControl: UInt16 = 0x029F // AC Desktop Show All Windows
     static let spotlight: UInt16 = 0x0221      // AC Search
+    /// F5 on a Mac keyboard. Apple's own key is on its vendor page (0xFF01),
+    /// which macOS has filtered by vendor ID since Big Sur, so a third-party
+    /// keyboard can't send it. This is the standard Consumer equivalent and
+    /// needs no report-map change — our consumer report already covers
+    /// 0x000–0x3FF.
+    static let voiceCommand: UInt16 = 0x00CF
 }
 
 @Observable
@@ -137,6 +148,9 @@ final class RemoteController {
 
     func sceneDidBecomeActive() {
         isBackgrounded = false
+        // Otherwise the idle clock counts the whole time spent away and a hint
+        // fires a second after returning, mid-reengagement.
+        noteInteraction()
         // Recover whatever discoverability iOS degraded while backgrounded
         if status != .connected {
             peripheral.startAdvertising()
@@ -183,6 +197,7 @@ final class RemoteController {
     // MARK: - Keyboard
 
     func type(text: String) {
+        noteEcho(text)
         var dropped = 0
         for character in text {
             guard let keystrokes = CharacterComposer.keystrokes(for: character) else {
@@ -206,11 +221,25 @@ final class RemoteController {
         pressKey(HIDKey.backspace)
     }
 
+    /// Seek by one player step. Deliberately arrow keys rather than a consumer
+    /// usage: every player binds these, and none agree on how many seconds a
+    /// step is worth — which is why nothing in the UI claims seconds.
+    func seek(_ direction: Int) {
+        pressKey(direction > 0 ? HIDKey.rightArrow : HIDKey.leftArrow)
+    }
+
+    /// The letter every streaming player agrees on. Not a system shortcut —
+    /// ⌃⌘F would fullscreen the browser window rather than the video.
+    func toggleFullscreen() {
+        type(text: "f")
+    }
+
     func pressKey(_ keyCode: UInt8) {
         enqueueKeystroke(keyCode: keyCode, modifiers: consumeStickyModifiers())
     }
 
     func toggleModifier(_ bit: UInt8) {
+        noteInteraction()
         stickyModifiers ^= bit
     }
 
@@ -219,9 +248,35 @@ final class RemoteController {
     }
 
     private func consumeStickyModifiers() -> UInt8 {
+        guard stickyModifiers != 0 else { return 0 }
         let modifiers = stickyModifiers
         stickyModifiers = 0
         return modifiers
+    }
+
+    // MARK: - Echo
+
+    /// The tail of what has been sent, so the on-screen keyboard can be used
+    /// without watching the Mac. Only ever read while typing.
+    private(set) var echo = ""
+
+    @ObservationIgnored
+    private var echoClearTask: DispatchWorkItem?
+    private let maxEcho = 64
+
+    private func noteEcho(_ text: String) {
+        echo = String((echo + text).suffix(maxEcho))
+        echoClearTask?.cancel()
+        let task = DispatchWorkItem { [weak self] in
+            self?.echo = ""
+        }
+        echoClearTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: task)
+    }
+
+    func clearEcho() {
+        echoClearTask?.cancel()
+        echo = ""
     }
 
     private func registerDroppedCharacters(_ count: Int) {
@@ -237,6 +292,7 @@ final class RemoteController {
     // MARK: - Send queue
 
     private func enqueueKeystroke(keyCode: UInt8, modifiers: UInt8) {
+        noteInteraction()
         guard sendQueue.count + 2 <= maxQueuedSends else { return }
         sendQueue.append(.keyboard(modifiers: modifiers, keyCode: keyCode))
         sendQueue.append(.keyboard(modifiers: 0, keyCode: nil))
@@ -244,6 +300,7 @@ final class RemoteController {
     }
 
     func tapConsumer(_ usage: UInt16) {
+        noteInteraction()
         let pendingTapEntries = sendQueue.reduce(0) { count, send in
             if case .consumer = send { return count + 1 }
             return count
@@ -252,6 +309,16 @@ final class RemoteController {
         sendQueue.append(.consumer(usage))
         sendQueue.append(.consumer(0))
         drainSendQueue()
+    }
+
+    /// When something was last sent, in any form. Read by the hint coach to
+    /// find a lull; deliberately not observable, since every keystroke would
+    /// otherwise invalidate the whole view tree.
+    @ObservationIgnored
+    private(set) var lastInteraction = Date()
+
+    private func noteInteraction() {
+        lastInteraction = Date()
     }
 
     private func drainSendQueue() {
@@ -276,17 +343,39 @@ final class RemoteController {
 
     // MARK: - Mouse
 
+    /// Buttons currently held down, so every move made during a drag carries
+    /// them. Without this the button could only ever be tapped, which is why
+    /// dragging a file was impossible.
+    @ObservationIgnored
+    private var heldMouseButtons: UInt8 = 0
+
     func mouseMove(dx: Int8, dy: Int8) {
-        peripheral.sendMouseReport(buttons: 0, dx: dx, dy: dy, wheel: 0)
+        noteInteraction()
+        peripheral.sendMouseReport(buttons: heldMouseButtons, dx: dx, dy: dy, wheel: 0)
+    }
+
+    func mouseDown(button: UInt8) {
+        noteInteraction()
+        heldMouseButtons |= button
+        peripheral.sendMouseReport(buttons: heldMouseButtons, dx: 0, dy: 0, wheel: 0)
+    }
+
+    func mouseUp() {
+        guard heldMouseButtons != 0 else { return }
+        noteInteraction()
+        heldMouseButtons = 0
+        peripheral.sendMouseReport(buttons: 0, dx: 0, dy: 0, wheel: 0)
     }
 
     func mouseScroll(wheel: Int8, pan: Int8 = 0) {
-        peripheral.sendMouseReport(buttons: 0, dx: 0, dy: 0, wheel: wheel, pan: pan)
+        noteInteraction()
+        peripheral.sendMouseReport(buttons: heldMouseButtons, dx: 0, dy: 0, wheel: wheel, pan: pan)
     }
 
     /// Clicks consume sticky modifiers and hold them across the click, so
     /// ⌘-click / Shift-click / Option-click work from the modifier row.
     func mouseClick(button: UInt8) {
+        noteInteraction()
         let modifiers = consumeStickyModifiers()
         if modifiers != 0 {
             peripheral.sendKeyboardReport(modifiers: modifiers, keyCodes: [])
@@ -328,6 +417,7 @@ extension RemoteController: BLEHIDPeripheralDelegate {
 
     func peripheralDidDisconnect(central: CBCentral) {
         status = .waitingForBluetooth
+        heldMouseButtons = 0
         sendQueue.removeAll()
         stickyModifiers = 0
         capsLockOn = false
