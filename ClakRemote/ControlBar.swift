@@ -23,10 +23,18 @@ private struct SidewaysClip: Shape {
 /// can't compete for the same touch.
 struct ControlBar: View {
     let controller: RemoteController
+    let coach: HintCoach
     @Binding var layer: ControlLayer
     @Binding var isExpanded: Bool
     let isTyping: Bool
     let onToggleKeyboard: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Travel added by a peek, alongside the finger's own.
+    @State private var peekOffset: CGFloat = 0
+    @State private var peekBump: CGFloat = 0
+    @State private var pullTug: CGFloat = 0
 
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
 
@@ -58,6 +66,41 @@ struct ControlBar: View {
         .glassGroup()
         .animation(.spring(response: 0.34, dampingFraction: 0.82), value: isExpanded)
         .animation(.spring(response: 0.34, dampingFraction: 0.82), value: isTyping)
+        .onChange(of: coach.current) { _, hint in
+            guard let hint, hint.style == .peek, !reduceMotion else { return }
+            demonstrate(hint.affordance)
+        }
+    }
+
+    // MARK: - Hints
+
+    /// Moves the thing in the direction it wants to be moved. A peek of the
+    /// neighbouring layer teaches both that it exists and which way it lives,
+    /// which a nudging handle on its own can't.
+    private func demonstrate(_ affordance: Affordance) {
+        let out = Animation.spring(response: 0.26, dampingFraction: 0.62)
+        let back = Animation.spring(response: 0.44, dampingFraction: 0.74)
+
+        switch affordance {
+        case .layerSwipe:
+            withAnimation(out) { peekOffset = layer == .media ? -26 : 26 }
+            after(0.34) { withAnimation(back) { peekOffset = 0 } }
+        case .panelExpand:
+            withAnimation(out) { peekBump = 12 }
+            after(0.34) { withAnimation(back) { peekBump = 0 } }
+        case .pullKey:
+            withAnimation(out) { pullTug = -8 }
+            after(0.30) { withAnimation(back) { pullTug = 0 } }
+        }
+    }
+
+    private func after(_ delay: TimeInterval, _ work: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private var wordsHint: Hint? {
+        guard let hint = coach.current else { return nil }
+        return (hint.style == .words || reduceMotion) ? hint : nil
     }
 
     // MARK: - Layer pager
@@ -70,11 +113,11 @@ struct ControlBar: View {
                 layerStack(.media).frame(width: geo.size.width)
                 layerStack(.keys).frame(width: geo.size.width)
             }
-            .offset(x: -layerIndex * geo.size.width + dragOffset)
+            .offset(x: -layerIndex * geo.size.width + dragOffset + peekOffset)
             .onAppear { barWidth = geo.size.width }
             .onChange(of: geo.size.width) { _, width in barWidth = width }
         }
-        .frame(height: pagerHeight)
+        .frame(height: pagerHeight + peekBump)
         // Clips sideways only: a pulled key grows far above the bar and must
         // not be cut off by the pager's bounds.
         .clipShape(SidewaysClip())
@@ -101,13 +144,33 @@ struct ControlBar: View {
     // MARK: - Handle
 
     private var grabber: some View {
-        Capsule()
-            .fill(Color.white.opacity(0.30))
-            .frame(width: ControlMetrics.grabberWidth, height: ControlMetrics.grabberHeight)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-            .gesture(panelGesture)
+        Group {
+            if let hint = wordsHint {
+                // Said where the control is, rather than in a bubble pointing
+                // at it.
+                HStack(spacing: 6) {
+                    Image(systemName: hint.affordance.glyph)
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(hint.affordance.words)
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .foregroundStyle(.secondary)
+                .transition(.opacity)
+            } else {
+                // Lit while anything is still undiscovered: costs no space,
+                // always visible, and retires itself once everything is found.
+                Capsule()
+                    .fill(coach.hasUnlearned ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.white.opacity(0.30)))
+                    .frame(width: ControlMetrics.grabberWidth, height: ControlMetrics.grabberHeight)
+                    .transition(.opacity)
+            }
+        }
+        .frame(height: ControlMetrics.grabberHeight)
+        .animation(.easeInOut(duration: 0.22), value: wordsHint)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .gesture(panelGesture)
             .accessibilityElement()
             .accessibilityLabel("Control panel")
             .accessibilityValue(layer == .media ? "Media layer" : "Keys layer")
@@ -125,6 +188,7 @@ struct ControlBar: View {
     private var panelGesture: some Gesture {
         DragGesture(minimumDistance: 6)
             .onChanged { value in
+                coach.cancel()
                 if gestureAxis == nil {
                     gestureAxis = abs(value.translation.width) > abs(value.translation.height)
                         ? .horizontal : .vertical
@@ -145,6 +209,7 @@ struct ControlBar: View {
                         if abs(projected) > max(barWidth * 0.3, 40), let target, target != layer {
                             layer = target
                             isExpanded = false
+                            coach.markDiscovered(.layerSwipe)
                             haptic.impactOccurred()
                         }
                         dragOffset = 0
@@ -152,6 +217,7 @@ struct ControlBar: View {
                 } else {
                     guard abs(value.translation.height) > 20 else { return }
                     isExpanded = value.translation.height < 0
+                    if isExpanded { coach.markDiscovered(.panelExpand) }
                     haptic.impactOccurred()
                 }
             }
@@ -188,7 +254,8 @@ struct ControlBar: View {
             key("backward.fill", size: 28) { controller.tapConsumer(ConsumerUsage.previous) }
 
             // Tap plays or pauses; pulled sideways it becomes the scrubber.
-            PullKey(axis: .horizontal, unit: "skips") { step in
+            PullKey(axis: .horizontal, unit: "skips", tug: pullTug) { step in
+                coach.markDiscovered(.pullKey)
                 controller.seek(step)
             } onTap: {
                 controller.tapConsumer(ConsumerUsage.playPause)
@@ -203,7 +270,8 @@ struct ControlBar: View {
 
             separator
 
-            PullKey(axis: .vertical, unit: "steps") { step in
+            PullKey(axis: .vertical, unit: "steps", tug: pullTug) { step in
+                coach.markDiscovered(.pullKey)
                 controller.tapConsumer(step > 0 ? ConsumerUsage.brightnessUp : ConsumerUsage.brightnessDown)
             } label: {
                 Image(systemName: "sun.max").font(.system(size: 27))
@@ -211,7 +279,8 @@ struct ControlBar: View {
             .accessibilityLabel("Brightness")
             .accessibilityHint("Drag up or down to change")
 
-            PullKey(axis: .vertical, unit: "steps") { step in
+            PullKey(axis: .vertical, unit: "steps", tug: pullTug) { step in
+                coach.markDiscovered(.pullKey)
                 controller.tapConsumer(step > 0 ? ConsumerUsage.volumeUp : ConsumerUsage.volumeDown)
             } onTap: {
                 controller.tapConsumer(ConsumerUsage.mute)

@@ -25,16 +25,20 @@ struct PullKey<Label: View>: View {
     let onTap: (() -> Void)?
     /// Shown beneath the delta while pulling ("steps", "skips").
     let unit: String
+    /// Offset applied by a hint, to show that this key gives when pulled.
+    var tug: CGFloat = 0
 
     init(
         axis: PullAxis,
         unit: String,
+        tug: CGFloat = 0,
         onStep: @escaping (Int) -> Void,
         onTap: (() -> Void)? = nil,
         @ViewBuilder label: () -> Label
     ) {
         self.axis = axis
         self.unit = unit
+        self.tug = tug
         self.onStep = onStep
         self.onTap = onTap
         self.label = label()
@@ -48,7 +52,16 @@ struct PullKey<Label: View>: View {
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
     var body: some View {
-        label
+        HStack(spacing: 2) {
+            label
+            // These two keys behave unlike every other key on the bar, and
+            // marking that is information rather than clutter — the same mark
+            // iOS puts on a stepper. Unlike the hints, it never retires.
+            Image(systemName: axis == .vertical ? "chevron.up.chevron.down" : "chevron.left.chevron.right")
+                .font(.system(size: 7, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+            .offset(x: axis == .horizontal ? tug : 0, y: axis == .vertical ? tug : 0)
             .frame(maxWidth: .infinity, minHeight: ControlMetrics.keyHeight)
             .contentShape(Rectangle())
             .overlay(alignment: overlayAlignment) {

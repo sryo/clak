@@ -227,6 +227,7 @@ final class RemoteController {
     }
 
     func toggleModifier(_ bit: UInt8) {
+        noteInteraction()
         stickyModifiers ^= bit
     }
 
@@ -278,6 +279,7 @@ final class RemoteController {
     // MARK: - Send queue
 
     private func enqueueKeystroke(keyCode: UInt8, modifiers: UInt8) {
+        noteInteraction()
         guard sendQueue.count + 2 <= maxQueuedSends else { return }
         sendQueue.append(.keyboard(modifiers: modifiers, keyCode: keyCode))
         sendQueue.append(.keyboard(modifiers: 0, keyCode: nil))
@@ -285,6 +287,7 @@ final class RemoteController {
     }
 
     func tapConsumer(_ usage: UInt16) {
+        noteInteraction()
         let pendingTapEntries = sendQueue.reduce(0) { count, send in
             if case .consumer = send { return count + 1 }
             return count
@@ -293,6 +296,16 @@ final class RemoteController {
         sendQueue.append(.consumer(usage))
         sendQueue.append(.consumer(0))
         drainSendQueue()
+    }
+
+    /// When something was last sent, in any form. Read by the hint coach to
+    /// find a lull; deliberately not observable, since every keystroke would
+    /// otherwise invalidate the whole view tree.
+    @ObservationIgnored
+    private(set) var lastInteraction = Date()
+
+    private func noteInteraction() {
+        lastInteraction = Date()
     }
 
     private func drainSendQueue() {
@@ -318,16 +331,19 @@ final class RemoteController {
     // MARK: - Mouse
 
     func mouseMove(dx: Int8, dy: Int8) {
+        noteInteraction()
         peripheral.sendMouseReport(buttons: 0, dx: dx, dy: dy, wheel: 0)
     }
 
     func mouseScroll(wheel: Int8, pan: Int8 = 0) {
+        noteInteraction()
         peripheral.sendMouseReport(buttons: 0, dx: 0, dy: 0, wheel: wheel, pan: pan)
     }
 
     /// Clicks consume sticky modifiers and hold them across the click, so
     /// ⌘-click / Shift-click / Option-click work from the modifier row.
     func mouseClick(button: UInt8) {
+        noteInteraction()
         let modifiers = consumeStickyModifiers()
         if modifiers != 0 {
             peripheral.sendKeyboardReport(modifiers: modifiers, keyCodes: [])

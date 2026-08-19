@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct ContentView: View {
@@ -5,6 +6,16 @@ struct ContentView: View {
     @State private var keyboardFocus = KeyboardFocus()
     @State private var layer: ControlLayer = .media
     @State private var isExpanded = false
+    @State private var coach = HintCoach()
+
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Only ticks while there is still something to teach, and only while
+    /// connected — the pairing screen has nothing to demonstrate.
+    private var idleClock: Publishers.Autoconnect<Timer.TimerPublisher> {
+        Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -25,6 +36,7 @@ struct ContentView: View {
 
                     ControlBar(
                         controller: controller,
+                        coach: coach,
                         layer: $layer,
                         isExpanded: $isExpanded,
                         isTyping: keyboardFocus.isVisible,
@@ -46,6 +58,22 @@ struct ContentView: View {
         }
         .onChange(of: keyboardFocus.isVisible) { _, visible in
             if !visible { controller.clearEcho() }
+            coach.cancel()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active: coach.sessionBegan()
+            default: coach.sessionEnded()
+            }
+        }
+        .onReceive(idleClock) { _ in
+            guard controller.status == .connected,
+                  !keyboardFocus.isVisible,
+                  coach.hasUnlearned else { return }
+            coach.tick(
+                idleFor: Date().timeIntervalSince(controller.lastInteraction),
+                reduceMotion: reduceMotion
+            )
         }
     }
 
