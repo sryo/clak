@@ -105,11 +105,11 @@ final class TrackpadUIView: UIView {
         accessibilityTraits = [.allowsDirectInteraction]
         accessibilityCustomActions = [
             UIAccessibilityCustomAction(name: "Click") { [weak self] _ in
-                self?.controller?.mouseClick(button: 1)
+                self?.controller?.mouseClick(button: MouseButton.left)
                 return true
             },
             UIAccessibilityCustomAction(name: "Right click") { [weak self] _ in
-                self?.controller?.mouseClick(button: 2)
+                self?.controller?.mouseClick(button: MouseButton.right)
                 return true
             },
             UIAccessibilityCustomAction(name: "Start drag") { [weak self] _ in
@@ -158,14 +158,12 @@ final class TrackpadUIView: UIView {
             scrollAccX = 0
             scrollAccY = 0
             lastTouchTimestamp = touches.first?.timestamp ?? 0
-        }
-        if activeTouches.isEmpty {
-            let now = ProcessInfo.processInfo.systemUptime
+
             if isDragging {
                 // Coming back mid-clutch: keep the button down.
                 dragReleaseWork?.cancel()
                 dragReleaseWork = nil
-            } else if now - lastTapEnd < Self.dragArmWindow {
+            } else if sessionStart - lastTapEnd < Self.dragArmWindow {
                 beginDrag()
             }
         }
@@ -234,7 +232,7 @@ final class TrackpadUIView: UIView {
 
         if dragDistance < Constants.Trackpad.tapThreshold && duration < Self.tapMaxDuration {
             // 1-finger tap = left click, 2-finger tap = right click
-            controller?.mouseClick(button: sessionMaxTouches >= 2 ? 0x02 : 0x01)
+            controller?.mouseClick(button: sessionMaxTouches >= 2 ? MouseButton.right : MouseButton.left)
             // Only a one-finger tap can be the first half of a drag.
             lastTapEnd = sessionMaxTouches >= 2 ? 0 : now
             return
@@ -250,7 +248,7 @@ final class TrackpadUIView: UIView {
     private func beginDrag() {
         isDragging = true
         lastTapEnd = 0
-        controller?.mouseDown(button: 0x01)
+        controller?.mouseDown(button: MouseButton.left)
         dragHaptic.impactOccurred()
     }
 
@@ -262,7 +260,7 @@ final class TrackpadUIView: UIView {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.dragClutchGrace, execute: work)
     }
 
-    func endDrag() {
+    private func endDrag() {
         dragReleaseWork?.cancel()
         dragReleaseWork = nil
         guard isDragging else { return }
@@ -272,6 +270,8 @@ final class TrackpadUIView: UIView {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        endDrag()
+        lastTapEnd = 0
         activeTouches.subtract(touches)
         if activeTouches.isEmpty {
             pendingDelta = .zero

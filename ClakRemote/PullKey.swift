@@ -13,8 +13,9 @@ enum PullAxis {
 /// same control with no mode to be in — the finger holds the state, so it
 /// can't be left switched on by accident.
 ///
-/// While it's being pulled the key grows along the axis it was pulled, into a
-/// track showing how far you've come. That readout is deliberately a DELTA:
+/// While it's being pulled the key opens a track along the axis it was pulled —
+/// a column out of the key for vertical, a strip above it for horizontal —
+/// showing how far you've come. That readout is deliberately a DELTA:
 /// the Mac never reports its brightness, volume or playback position, and it
 /// draws its own HUD for the first two, so an absolute level would be invented.
 struct PullKey<Label: View>: View {
@@ -24,11 +25,11 @@ struct PullKey<Label: View>: View {
     let onStep: (Int) -> Void
     let onTap: (() -> Void)?
     /// Offset applied by a hint, to show that this key gives when pulled.
-    var tug: CGFloat = 0
+    let tug: CGFloat
     /// Where the grown track hangs from. A key at the edge of the bar anchors
     /// its column to that edge, since a centred one would be cut off by the
     /// pager's clip.
-    var trackAlignment: Alignment = .bottom
+    let trackAlignment: Alignment
 
     init(
         axis: PullAxis,
@@ -59,20 +60,19 @@ struct PullKey<Label: View>: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let haptic = UIImpactFeedbackGenerator(style: .light)
 
     var body: some View {
         HStack(spacing: 2) {
             label
-            // These two keys behave unlike every other key on the bar, and
-            // marking that is information rather than clutter — the same mark
-            // iOS puts on a stepper. Unlike the hints, it never retires.
+            // A pull key behaves unlike a plain one, and saying so is
+            // information rather than clutter — the mark iOS puts on a
+            // stepper. Unlike the coach's hints, it never retires.
             Image(systemName: axis == .vertical ? "chevron.up.chevron.down" : "chevron.left.chevron.right")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
         }
             .offset(x: axis == .horizontal ? tug : 0, y: axis == .vertical ? tug : 0)
-            .frame(maxWidth: .infinity, minHeight: ControlMetrics.keyHeight(compact: isCompact))
+            .frame(maxWidth: .infinity, minHeight: keyHeight)
             .contentShape(Rectangle())
             .background(
                 GeometryReader { geo in
@@ -90,7 +90,7 @@ struct PullKey<Label: View>: View {
             .overlay(alignment: trackAlignment) {
                 if isPulling {
                     PullTrack(axis: axis, steps: steps, columnHeight: columnHeight)
-                        .offset(y: axis == .horizontal ? -(ControlMetrics.keyHeight(compact: isCompact) + 14) : 0)
+                        .offset(y: axis == .horizontal ? -(keyHeight + 14) : 0)
                         .transition(.scale(scale: 0.2, anchor: .bottom).combined(with: .opacity))
                 }
             }
@@ -114,11 +114,14 @@ struct PullKey<Label: View>: View {
     }
 
     private var isCompact: Bool { verticalSizeClass == .compact }
+    private var keyHeight: CGFloat { ControlMetrics.keyHeight(compact: isCompact) }
 
     /// Never taller than the space above the key, so rotating to landscape
-    /// shortens the column instead of running it off the screen.
+    /// shortens the column instead of running it off the screen. The floor is
+    /// what the readout needs to stay legible; the ceiling is a portrait
+    /// column's full height, and 24 keeps it clear of the status bar.
     private var columnHeight: CGFloat {
-        min(396, max(150, roomAbove - 24))
+        min(ControlMetrics.maxPullReach, max(150, roomAbove - 24))
     }
 
     /// Everything a pull accumulates, cleared on any ending — normal or not.
@@ -140,18 +143,18 @@ struct PullKey<Label: View>: View {
                     steppedTranslation += ControlMetrics.pointsPerStep * sign
                     steps += 1
                     onStep(1)
-                    haptic.impactOccurred()
+                    Haptics.light.impactOccurred()
                 }
                 while (travel - steppedTranslation) * sign <= -ControlMetrics.pointsPerStep {
                     steppedTranslation -= ControlMetrics.pointsPerStep * sign
                     steps -= 1
                     onStep(-1)
-                    haptic.impactOccurred()
+                    Haptics.light.impactOccurred()
                 }
 
                 // Opens on the first step rather than the first movement:
-                // between the 6pt tap slop and the 14pt step it would
-                // otherwise sit on screen reading 0 with nothing lit.
+                // between tapSlop and pointsPerStep it would otherwise sit on
+                // screen reading 0 with nothing lit.
                 if !isPulling, steps != 0 {
                     isPulling = true
                 }
@@ -161,7 +164,7 @@ struct PullKey<Label: View>: View {
                    abs(value.translation.height) < ControlMetrics.tapSlop,
                    abs(value.translation.width) < ControlMetrics.tapSlop {
                     onTap()
-                    haptic.impactOccurred()
+                    Haptics.light.impactOccurred()
                 }
                 endPull()
             }
@@ -173,9 +176,7 @@ struct PullKey<Label: View>: View {
 private struct PullTrack: View {
     let axis: PullAxis
     let steps: Int
-    var columnHeight: CGFloat = 396
-
-    private static let tickCount = 14
+    let columnHeight: CGFloat
 
     var body: some View {
         Group {
@@ -184,11 +185,11 @@ private struct PullTrack: View {
                     delta
                     // Spacers between the ticks rather than fixed gaps, so the
                     // strip fills whatever height it is given.
-                    ForEach(columnTicks.reversed(), id: \.self) { index in
+                    ForEach(Self.columnTicks.reversed(), id: \.self) { index in
                         Spacer(minLength: 3)
                         Capsule()
                             .fill(tint(for: index))
-                            .frame(width: tickWidth(for: index), height: index == 0 ? 3 : 2)
+                            .frame(width: extent(index, zero: 34, filledSize: 30, rest: 16), height: index == 0 ? 3 : 2)
                     }
                     Spacer(minLength: 3)
                 }
@@ -198,10 +199,10 @@ private struct PullTrack: View {
                 VStack(spacing: 10) {
                     delta
                     HStack(spacing: 5) {
-                        ForEach(scrubTicks, id: \.self) { index in
+                        ForEach(Self.scrubTicks, id: \.self) { index in
                             Capsule()
-                                .fill(scrubTint(for: index))
-                                .frame(width: 2, height: scrubHeight(for: index))
+                                .fill(tint(for: index))
+                                .frame(width: 2, height: extent(index, zero: 26, filledSize: 18, rest: 10))
                         }
                     }
                 }
@@ -223,41 +224,24 @@ private struct PullTrack: View {
             .kerning(-1)
     }
 
-    // MARK: Vertical ticks
+    // MARK: Ticks
 
-    /// Centred on where the pull began, so filling upward and filling
-    /// downward look different — the direction is the whole point of a delta.
-    private var columnTicks: [Int] { Array(-7...7) }
+    /// Both tracks read out from the centre, so pulling one way looks unlike
+    /// pulling the other — direction is the whole point of a delta.
+    private static let columnTicks = -7...7
+    private static let scrubTicks = -10...10
 
-    private func inColumnRange(_ index: Int) -> Bool {
+    private func filled(_ index: Int) -> Bool {
         steps >= 0 ? (index > 0 && index <= steps) : (index < 0 && index >= steps)
-    }
-
-    private func tickWidth(for index: Int) -> CGFloat {
-        if index == 0 { return 34 }
-        return inColumnRange(index) ? 30 : 16
     }
 
     private func tint(for index: Int) -> Color {
         if index == 0 { return Color.white.opacity(0.85) }
-        return inColumnRange(index) ? .accentColor : Color.white.opacity(0.35)
+        return filled(index) ? .accentColor : Color.white.opacity(0.35)
     }
 
-    // MARK: Horizontal ticks — centred on where the drag began
-
-    private var scrubTicks: [Int] { Array(-10...10) }
-
-    private func scrubHeight(for index: Int) -> CGFloat {
-        if index == 0 { return 26 }
-        return inScrubRange(index) ? 18 : 10
-    }
-
-    private func scrubTint(for index: Int) -> Color {
-        if index == 0 { return Color.white.opacity(0.85) }
-        return inScrubRange(index) ? .accentColor : Color.white.opacity(0.35)
-    }
-
-    private func inScrubRange(_ index: Int) -> Bool {
-        steps >= 0 ? (index > 0 && index <= steps) : (index < 0 && index >= steps)
+    private func extent(_ index: Int, zero: CGFloat, filledSize: CGFloat, rest: CGFloat) -> CGFloat {
+        if index == 0 { return zero }
+        return filled(index) ? filledSize : rest
     }
 }

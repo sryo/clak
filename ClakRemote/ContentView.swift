@@ -20,9 +20,9 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: isCompact ? 8 : 10) {
-            // In landscape the keyboard leaves about 200pt, which the bar and
-            // the echo already spend. Keeping the surface would give it a
-            // negative height and push the bar off the bottom.
+            // No trackpad while typing in landscape: the keyboard leaves too
+            // little height for the surface to be worth anything, and forcing
+            // it in pushes the bar off the bottom of the screen.
             if !(keyboardFocus.isVisible && isCompact) {
                 surface
             }
@@ -54,6 +54,9 @@ struct ContentView: View {
         .background(Color.black)
         .preferredColorScheme(.dark)
         .overlay {
+            // Barely rendered rather than hidden: a field at zero opacity, or
+            // behind .hidden(), can't reliably hold first responder, and this
+            // one is what turns the system keyboard into keystrokes.
             KeyInputView(controller: controller, focus: keyboardFocus)
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
@@ -73,12 +76,11 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active: coach.sessionBegan()
-            case .background: coach.sessionEnded()
             default: coach.cancel()
             }
         }
         .onReceive(idleClock) { _ in
-            guard isConnected, !keyboardFocus.isVisible, coach.hasUnlearned else { return }
+            guard isConnected, !keyboardFocus.isVisible else { return }
             coach.tick(
                 idleFor: Date().timeIntervalSince(controller.lastInteraction),
                 reduceMotion: reduceMotion
@@ -91,8 +93,7 @@ struct ContentView: View {
     /// instead — empty means ready.
     private var surface: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemBackground))
+            surfaceShape.fill(Color(uiColor: .secondarySystemBackground))
 
             if isConnected {
                 TrackpadView(controller: controller)
@@ -107,7 +108,11 @@ struct ContentView: View {
             }
         }
         .frame(maxHeight: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .clipShape(surfaceShape)
+    }
+
+    private var surfaceShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: ControlMetrics.surfaceRadius, style: .continuous)
     }
 
     /// What has gone out, so the phone can be typed on without watching the

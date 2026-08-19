@@ -10,8 +10,12 @@ enum ControlLayer {
 /// neighbouring layer stays hidden but a pulled key can still grow out of the
 /// bar.
 private struct SidewaysClip: Shape {
+    /// Enough for the tallest column a key can grow, with room to spare.
+    private static let openAbove = ControlMetrics.maxPullReach * 2
+
     func path(in rect: CGRect) -> Path {
-        Path(CGRect(x: rect.minX, y: rect.minY - 1200, width: rect.width, height: rect.height + 1200))
+        Path(CGRect(x: rect.minX, y: rect.minY - Self.openAbove,
+                    width: rect.width, height: rect.height + Self.openAbove))
     }
 }
 
@@ -37,8 +41,6 @@ struct ControlBar: View {
     @State private var peekBump: CGFloat = 0
     @State private var pullTug: CGFloat = 0
 
-    private let haptic = UIImpactFeedbackGenerator(style: .medium)
-
     /// Live horizontal travel of the layer pager while the handle is dragged.
     @State private var dragOffset: CGFloat = 0
     @State private var barWidth: CGFloat = 0
@@ -49,9 +51,10 @@ struct ControlBar: View {
     /// gives, since onEnded isn't delivered for an interrupted gesture.
     @GestureState private var isDraggingHandle = false
 
-    /// Vertical gap the expanded row adds: two 5pt VStack spacings and the
-    /// divider between them.
-    private static let expandedGap: CGFloat = 11
+    private static let rowSpacing: CGFloat = 5
+    /// What the expanded row adds beyond a second key row: the spacing above
+    /// and below its divider, plus the divider itself.
+    private static let expandedGap: CGFloat = rowSpacing * 2 + 1
 
     /// One curve for every panel-sized motion, so the pager and the handle
     /// that drives it can't land at different times.
@@ -59,15 +62,16 @@ struct ControlBar: View {
         reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.84)
     }
 
-    private var tap: UIImpactFeedbackGenerator { Self.tapHaptic }
-    private static let tapHaptic = UIImpactFeedbackGenerator(style: .light)
-
     private var isCompact: Bool { verticalSizeClass == .compact }
     private var keyHeight: CGFloat { ControlMetrics.keyHeight(compact: isCompact) }
-    private var typingKeyHeight: CGFloat { ControlMetrics.typingKeyHeight(compact: isCompact) }
+    /// Typing swaps in a shorter row, and it is the only thing that does — so
+    /// every keycap derives its height rather than being handed one.
+    private var rowHeight: CGFloat {
+        isTyping ? ControlMetrics.typingKeyHeight(compact: isCompact) : keyHeight
+    }
 
     var body: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: Self.rowSpacing) {
             grabber
 
             if isTyping {
@@ -76,8 +80,7 @@ struct ControlBar: View {
                 layerPager
             }
         }
-        .padding(.top, 6)
-        .padding(.bottom, 6)
+        .padding(.vertical, 6)
         .padding(.horizontal, 8)
         .glassPanel(cornerRadius: ControlMetrics.barRadius)
         .glassGroup()
@@ -128,15 +131,14 @@ struct ControlBar: View {
         GeometryReader { geo in
             HStack(spacing: 0) {
                 layerStack(.media).frame(width: geo.size.width)
+                    .accessibilityHidden(layer != .media)
                 layerStack(.keys).frame(width: geo.size.width)
+                    .accessibilityHidden(layer != .keys)
             }
             .offset(x: -layerIndex * geo.size.width + dragOffset + peekOffset)
-            .onAppear { barWidth = geo.size.width }
-            .onChange(of: geo.size.width) { _, width in barWidth = width }
+            .onChange(of: geo.size.width, initial: true) { _, width in barWidth = width }
         }
         .frame(height: pagerHeight + peekBump)
-        // Clips sideways only: a pulled key grows far above the bar and must
-        // not be cut off by the pager's bounds.
         .clipShape(SidewaysClip())
     }
 
@@ -149,7 +151,7 @@ struct ControlBar: View {
     }
 
     private func layerStack(_ which: ControlLayer) -> some View {
-        VStack(spacing: 5) {
+        VStack(spacing: Self.rowSpacing) {
             if isExpanded {
                 extras(for: which)
                 Divider().overlay(Color.white.opacity(0.08)).padding(.horizontal, 12)
@@ -261,7 +263,7 @@ struct ControlBar: View {
                     // like one: pulling down puts the keyboard away.
                     if gestureAxis == .vertical, value.translation.height > 20 {
                         onToggleKeyboard()
-                        haptic.impactOccurred()
+                        Haptics.medium.impactOccurred()
                     }
                     return
                 }
@@ -270,13 +272,13 @@ struct ControlBar: View {
                     // Judge on where the flick was heading, not where it
                     // stopped, so a fast short swipe still commits.
                     let projected = value.predictedEndTranslation.width
-                    let target: ControlLayer? = projected < 0 ? .keys : .media
+                    let target: ControlLayer = projected < 0 ? .keys : .media
                     withAnimation(panelSpring) {
-                        if abs(projected) > min(max(barWidth * 0.3, 40), 120), let target, target != layer {
+                        if abs(projected) > min(max(barWidth * 0.3, 40), 120), target != layer {
                             layer = target
                             isExpanded = false
                             coach.markDiscovered(.layerSwipe)
-                            haptic.impactOccurred()
+                            Haptics.medium.impactOccurred()
                         }
                         dragOffset = 0
                     }
@@ -284,7 +286,7 @@ struct ControlBar: View {
                     guard abs(value.translation.height) > 20 else { return }
                     isExpanded = value.translation.height < 0
                     if isExpanded { coach.markDiscovered(.panelExpand) }
-                    haptic.impactOccurred()
+                    Haptics.medium.impactOccurred()
                 }
             }
     }
@@ -405,23 +407,23 @@ struct ControlBar: View {
     private var typingComplement: some View {
         VStack(spacing: 4) {
             HStack(spacing: 0) {
-                word("esc", "Escape", height: typingKeyHeight) { controller.pressKey(HIDKey.escape) }
-                key("arrow.left", "Left arrow", size: 24, height: typingKeyHeight) { controller.pressKey(HIDKey.leftArrow) }
-                key("arrow.down", "Down arrow", size: 24, height: typingKeyHeight) { controller.pressKey(HIDKey.downArrow) }
-                key("arrow.up", "Up arrow", size: 24, height: typingKeyHeight) { controller.pressKey(HIDKey.upArrow) }
-                key("arrow.right", "Right arrow", size: 24, height: typingKeyHeight) { controller.pressKey(HIDKey.rightArrow) }
-                key("keyboard.chevron.compact.down", "Hide keyboard", size: 27, height: typingKeyHeight,
+                word("esc", "Escape") { controller.pressKey(HIDKey.escape) }
+                key("arrow.left", "Left arrow", size: 24) { controller.pressKey(HIDKey.leftArrow) }
+                key("arrow.down", "Down arrow", size: 24) { controller.pressKey(HIDKey.downArrow) }
+                key("arrow.up", "Up arrow", size: 24) { controller.pressKey(HIDKey.upArrow) }
+                key("arrow.right", "Right arrow", size: 24) { controller.pressKey(HIDKey.rightArrow) }
+                key("keyboard.chevron.compact.down", "Hide keyboard", size: 27,
                     tint: .accentColor, action: onToggleKeyboard)
             }
 
             Divider().overlay(Color.white.opacity(0.08)).padding(.horizontal, 12)
 
             HStack(spacing: 0) {
-                modifier("shift", "Shift", HIDModifier.shift, height: typingKeyHeight)
-                modifier("control", "Control", HIDModifier.control, height: typingKeyHeight)
-                modifier("option", "Option", HIDModifier.option, height: typingKeyHeight)
-                modifier("command", "Command", HIDModifier.command, height: typingKeyHeight)
-                word("tab", "Tab", height: typingKeyHeight) { controller.pressKey(HIDKey.tab) }
+                modifier("shift", "Shift", HIDModifier.shift)
+                modifier("control", "Control", HIDModifier.control)
+                modifier("option", "Option", HIDModifier.option)
+                modifier("command", "Command", HIDModifier.command)
+                word("tab", "Tab") { controller.pressKey(HIDKey.tab) }
             }
         }
     }
@@ -434,75 +436,69 @@ struct ControlBar: View {
             .frame(width: 1, height: keyHeight * 0.4)
     }
 
+    /// The one keycap skeleton: same hit shape, same haptic, same press
+    /// treatment. Only the label and the tint differ between the three.
+    private func keycap<Content: View>(
+        _ label: String,
+        tint: AnyShapeStyle? = nil,
+        action: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Button {
+            Haptics.light.impactOccurred()
+            action()
+        } label: {
+            content()
+                .frame(maxWidth: .infinity, minHeight: rowHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(KeyPress(tint: tint))
+        .accessibilityLabel(label)
+    }
+
     private func key(
         _ systemName: String,
         _ label: String,
         size: CGFloat,
-        height: CGFloat? = nil,
         tint: Color? = nil,
         action: @escaping () -> Void
     ) -> some View {
-        Button {
-            tap.impactOccurred()
-            action()
-        } label: {
-            Image(systemName: systemName)
-                .font(.system(size: size))
-                .frame(maxWidth: .infinity, minHeight: height ?? keyHeight)
-                .contentShape(Rectangle())
+        keycap(label, tint: tint.map(AnyShapeStyle.init), action: action) {
+            Image(systemName: systemName).font(.system(size: size))
         }
-        .buttonStyle(KeyPress(tint: tint.map(AnyShapeStyle.init)))
-        .accessibilityLabel(label)
     }
 
     private func word(
         _ text: String,
         _ label: String,
-        height: CGFloat? = nil,
         action: @escaping () -> Void
     ) -> some View {
-        Button {
-            tap.impactOccurred()
-            action()
-        } label: {
-            Text(text)
-                .font(.system(size: 19, weight: .medium))
-                .frame(maxWidth: .infinity, minHeight: height ?? keyHeight)
-                .contentShape(Rectangle())
+        keycap(label, action: action) {
+            Text(text).font(.system(size: 19, weight: .medium))
         }
-        .buttonStyle(KeyPress(tint: nil))
-        .accessibilityLabel(label)
     }
 
-    /// Held modifiers are the one place colour appears in the keys layer.
     /// A held modifier is painted, not filled — a slab of colour behind the
     /// glyph fights the glass it sits on.
     ///
-    /// The original version failed for a subtler reason than "colour alone":
-    /// the tint is DIMMER than white, so latching Shift made the key recede
-    /// and read as disabled. Resting keys are dimmed instead, so holding one
-    /// is the brightest thing in the row, and the stroke thickens with it —
-    /// which is a difference that survives not being able to see the hue.
+    /// The tint is dimmer than white, so painting a held key in it would make
+    /// it recede and read as disabled. Resting keys are dimmed instead, which
+    /// makes a held one the brightest in the row; its weight rises with it, so
+    /// the state survives not being able to see the hue.
     private func modifier(
         _ systemName: String,
         _ label: String,
-        _ bit: UInt8,
-        height: CGFloat? = nil
+        _ bit: UInt8
     ) -> some View {
         let active = controller.isModifierActive(bit)
-        return Button {
-            tap.impactOccurred()
-            controller.toggleModifier(bit)
-        } label: {
+        return keycap(
+            label,
+            tint: active ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.white.opacity(0.62)),
+            action: { controller.toggleModifier(bit) }
+        ) {
             Image(systemName: systemName)
                 .font(.system(size: 27, weight: active ? .semibold : .regular))
-                .frame(maxWidth: .infinity, minHeight: height ?? keyHeight)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(KeyPress(tint: active
-            ? AnyShapeStyle(.tint)
-            : AnyShapeStyle(Color.white.opacity(0.62))))
-        .accessibilityLabel(label)
         .accessibilityValue(active ? "On" : "Off")
         .accessibilityAddTraits(active ? [.isSelected] : [])
     }

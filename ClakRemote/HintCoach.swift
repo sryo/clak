@@ -9,8 +9,9 @@ enum Affordance: String {
     case panelExpand
 
     /// Taught in this order: whichever is still unknown and costs the most to
-    /// miss goes first. Pull-keys hide brightness, volume and scrubbing behind
-    /// no affordance at all; expansion only hides extras.
+    /// miss goes first. A pull key wears a chevron, but nothing says what the
+    /// chevron affords, and behind it sit brightness, volume and scrubbing;
+    /// expansion only hides extras.
     static let teachingOrder: [Affordance] = [.pullKey, .layerSwipe, .panelExpand]
 
     var words: String {
@@ -37,8 +38,10 @@ enum HintStyle {
     case words
 }
 
-struct Hint: Equatable, Identifiable {
-    let id: Int
+struct Hint: Equatable {
+    /// Makes two consecutive hints for the same affordance compare unequal,
+    /// so the view's onChange fires for the second one too.
+    let sequence: Int
     let affordance: Affordance
     let style: HintStyle
 }
@@ -70,10 +73,6 @@ final class HintCoach {
 
     // MARK: - Ledger
 
-    var hasUnlearned: Bool {
-        Affordance.teachingOrder.contains { !isDiscovered($0) }
-    }
-
     func isDiscovered(_ affordance: Affordance) -> Bool {
         defaults.bool(forKey: "hint.done.\(affordance.rawValue)")
     }
@@ -98,11 +97,7 @@ final class HintCoach {
         clear()
     }
 
-    func sessionEnded() {
-        clear()
-    }
-
-    /// Any touch means the hint is no longer welcome.
+    /// Any touch, or leaving the app, means the hint is no longer welcome.
     func cancel() {
         clear()
     }
@@ -125,8 +120,9 @@ final class HintCoach {
         defaults.set(tries + 1, forKey: "hint.tries.\(next.rawValue)")
         hintedThisSession = true
         sequence += 1
-        current = Hint(id: sequence, affordance: next, style: style)
+        current = Hint(sequence: sequence, affordance: next, style: style)
 
+        // A peek is over as soon as the motion settles; words have to be read.
         scheduleClear(after: style == .peek ? 1.4 : 3.0)
     }
 

@@ -1,10 +1,11 @@
 import SwiftUI
+import UIKit
 
 /// Liquid Glass where the OS has it, a plain translucent material where it
 /// doesn't. Everything in the control layer goes through here so the two paths
 /// can never drift apart.
 struct GlassPanel: ViewModifier {
-    var cornerRadius: CGFloat = 34
+    var cornerRadius: CGFloat
 
     func body(content: Content) -> some View {
         if #available(iOS 26, *) {
@@ -20,7 +21,7 @@ struct GlassPanel: ViewModifier {
 }
 
 extension View {
-    func glassPanel(cornerRadius: CGFloat = 34) -> some View {
+    func glassPanel(cornerRadius: CGFloat) -> some View {
         modifier(GlassPanel(cornerRadius: cornerRadius))
     }
 
@@ -42,18 +43,20 @@ extension View {
 /// height or bar inset can't leave the two layers disagreeing.
 enum ControlMetrics {
     static let barInset: CGFloat = 16
-    /// Landscape has ~400pt of height in total, so 44pt of dead space below
-    /// the bar is 12% of it. The home-indicator inset already sits under this.
+    // Landscape leaves a phone about 400pt of height for everything, so the
+    // compact variants below all buy that back: 44pt of dead space under the
+    // bar, or 66pt keys, are affordable in portrait and not here.
     static func barBottom(compact: Bool) -> CGFloat { compact ? 12 : 44 }
     static let barRadius: CGFloat = 34
-    /// Landscape on a phone leaves about 400pt of height for everything, so
-    /// keys give some back rather than crowding out the trackpad.
+    static let surfaceRadius: CGFloat = 30
+    /// How far above the bar a pulled key may reach. SidewaysClip must stay
+    /// open at least this far, or a column comes out with a flat top.
+    static let maxPullReach: CGFloat = 396
     static func keyHeight(compact: Bool) -> CGFloat {
         compact ? 48 : 66
     }
 
-    /// 44 is the floor, not a suggestion: it is Apple's minimum touch target,
-    /// and the landscape value was under it.
+    /// 44 is Apple's minimum touch target — a floor, not a preference.
     static func typingKeyHeight(compact: Bool) -> CGFloat {
         compact ? 44 : 58
     }
@@ -66,9 +69,22 @@ enum ControlMetrics {
     static let tapSlop: CGFloat = 6
 }
 
-/// Every key on the bar presses the same way: a brief dim and shrink, which is
-/// the feedback the flat glyph-on-glass keys had none of. Also carries the
-/// disabled appearance, so `.disabled()` looks disabled rather than identical.
+/// Shared because a struct View is re-initialised on every parent body pass:
+/// a generator stored on one is discarded before it can warm up, so the first
+/// tick of a gesture — the one that most needs to be on time — arrives late.
+enum Haptics {
+    static let light = UIImpactFeedbackGenerator(style: .light)
+    static let medium = UIImpactFeedbackGenerator(style: .medium)
+
+    static func prepare() {
+        light.prepare()
+        medium.prepare()
+    }
+}
+
+/// Every key on the bar presses the same way: a brief dim and shrink. Also
+/// carries the disabled appearance, since a plain button style leaves a
+/// disabled key looking identical to a live one.
 struct KeyPress: ButtonStyle {
     /// Applied inside the style, so it wins over any foregroundStyle the
     /// caller puts outside the button.

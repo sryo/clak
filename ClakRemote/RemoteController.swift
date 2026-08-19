@@ -15,6 +15,11 @@ enum HIDKey {
     static let upArrow: UInt8 = 0x52
 }
 
+enum MouseButton {
+    static let left: UInt8 = 0x01
+    static let right: UInt8 = 0x02
+}
+
 enum HIDModifier {
     static let control: UInt8 = 0x01
     static let shift: UInt8 = 0x02
@@ -243,6 +248,7 @@ final class RemoteController {
     }
 
     private func consumeStickyModifiers() -> UInt8 {
+        guard stickyModifiers != 0 else { return 0 }
         let modifiers = stickyModifiers
         stickyModifiers = 0
         return modifiers
@@ -341,7 +347,7 @@ final class RemoteController {
     /// them. Without this the button could only ever be tapped, which is why
     /// dragging a file was impossible.
     @ObservationIgnored
-    private(set) var heldMouseButtons: UInt8 = 0
+    private var heldMouseButtons: UInt8 = 0
 
     func mouseMove(dx: Int8, dy: Int8) {
         noteInteraction()
