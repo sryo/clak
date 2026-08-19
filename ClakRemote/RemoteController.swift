@@ -115,7 +115,7 @@ final class RemoteController {
     /// Mac nobody is connecting to settles down instead of cycling forever.
     @ObservationIgnored
     private var republishCount = 0
-    private let firstRepublishDelay: TimeInterval = 25
+    private let firstRepublishDelay: TimeInterval = 8
     private let maxRepublishDelay: TimeInterval = 120
 
     @ObservationIgnored
@@ -185,9 +185,11 @@ final class RemoteController {
     /// Backgrounded advertising is degraded anyway (iOS strips the local name),
     /// so being ignored there says nothing about a stale cache.
     ///
-    /// The Mac-side helper in `clak-remote-bootstrap.sh` watches for the same
-    /// condition on a shorter fuse; keep this the slower of the two so its
-    /// cheaper remedy gets first refusal.
+    /// Measured: the Mac-side helper's forced service read does not make macOS
+    /// claim the keyboard — it succeeded five times running while the host
+    /// still ignored us. Republishing is what works, so this leads rather than
+    /// waiting for the helper, and retries quickly enough to beat a person
+    /// reaching to force-quit.
     private func syncRepublishTimer() {
         republishTask?.cancel()
         republishTask = nil
@@ -198,7 +200,13 @@ final class RemoteController {
         let task = DispatchWorkItem { [weak self] in
             guard let self, self.peripheral.isAdvertising, !self.isBackgrounded else { return }
             self.republishCount += 1
-            self.peripheral.republish()
+            // A host part-way through discovery or pairing would be broken by
+            // the database going out from under it; give it another round.
+            if self.peripheral.hasCentral {
+                self.syncRepublishTimer()
+            } else {
+                self.peripheral.republish()
+            }
         }
         republishTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: task)

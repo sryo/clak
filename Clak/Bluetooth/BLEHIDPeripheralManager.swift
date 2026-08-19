@@ -146,6 +146,10 @@ final class BLEHIDPeripheralManager: NSObject {
     /// Whether a central can actually receive input right now. The authority
     /// on connectedness — a cached flag in a client can outlive the link.
     var isConnected: Bool { hasConnectedCentral }
+
+    /// A central is present but may still be discovering or pairing. Distinct
+    /// from isConnected, which needs an input-report subscription.
+    var hasCentral: Bool { !sessions.isEmpty }
     var areServicesPublished: Bool { lifecycle == .published || lifecycle == .advertising }
 
     /// Delay between service adds. macOS CoreBluetooth needs generous settling
