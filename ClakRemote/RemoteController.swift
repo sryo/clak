@@ -80,7 +80,8 @@ final class RemoteController {
     private let peripheral = BLEHIDPeripheralManager(
         localName: "Clak Remote",
         includeHorizontalScroll: true,
-        restoreIdentifier: "com.clak.remote.peripheral"
+        restoreIdentifier: "com.clak.remote.peripheral",
+        publishesGenericAttributeService: false
     )
 
     /// One FIFO for every send with delivery-order semantics (keystrokes and
@@ -96,6 +97,15 @@ final class RemoteController {
     private var sendQueue: [PendingSend] = []
     private let maxQueuedSends = 512
     private let maxQueuedConsumerTaps = 24
+
+    @ObservationIgnored
+    private var republishTask: DispatchWorkItem?
+    /// Each unanswered round waits longer, so a phone left advertising near a
+    /// Mac nobody is connecting to settles down instead of cycling forever.
+    @ObservationIgnored
+    private var republishCount = 0
+    private let firstRepublishDelay: TimeInterval = 25
+    private let maxRepublishDelay: TimeInterval = 600
 
     @ObservationIgnored
     private var droppedNoteClearTask: DispatchWorkItem?
@@ -131,10 +141,43 @@ final class RemoteController {
         if status != .connected {
             peripheral.startAdvertising()
         }
+        syncRepublishTimer()
     }
 
     func sceneDidEnterBackground() {
         isBackgrounded = true
+        syncRepublishTimer()
+    }
+
+    // MARK: - Stale-host recovery
+
+    /// A Mac whose cached copy of this iPhone's services predates Clak Remote
+    /// ignores the advertisement indefinitely — it answers from that cache
+    /// instead of re-reading us. Republishing is what makes it look again,
+    /// which is why closing and reopening the app fixes it by hand.
+    ///
+    /// Driven by the current state rather than by any one transition, so every
+    /// route into advertising re-arms it and no caller has to remember to.
+    /// Backgrounded advertising is degraded anyway (iOS strips the local name),
+    /// so being ignored there says nothing about a stale cache.
+    ///
+    /// The Mac-side helper in `clak-remote-bootstrap.sh` watches for the same
+    /// condition on a shorter fuse; keep this the slower of the two so its
+    /// cheaper remedy gets first refusal.
+    private func syncRepublishTimer() {
+        republishTask?.cancel()
+        republishTask = nil
+
+        guard peripheral.isAdvertising, !isBackgrounded else { return }
+
+        let delay = min(firstRepublishDelay * pow(2, Double(republishCount)), maxRepublishDelay)
+        let task = DispatchWorkItem { [weak self] in
+            guard let self, self.peripheral.isAdvertising, !self.isBackgrounded else { return }
+            self.republishCount += 1
+            self.peripheral.republish()
+        }
+        republishTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: task)
     }
 
     // MARK: - Keyboard
@@ -268,6 +311,7 @@ extension RemoteController: BLEHIDPeripheralDelegate {
 
     func peripheralDidStartAdvertising() {
         status = .advertising
+        syncRepublishTimer()
     }
 
     func peripheralDidStopAdvertising() {
@@ -278,6 +322,8 @@ extension RemoteController: BLEHIDPeripheralDelegate {
 
     func peripheralDidConnect(central: CBCentral) {
         status = .connected
+        republishCount = 0
+        syncRepublishTimer()
     }
 
     func peripheralDidDisconnect(central: CBCentral) {

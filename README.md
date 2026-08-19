@@ -29,14 +29,14 @@ You already own great input devices. Use them everywhere.
 
 > **Pointer on iPhone:** enable **Settings → Accessibility → Touch → AssistiveTouch** to get a cursor. iPads show a pointer natively.
 
-> **Clak Remote not showing up on the Mac?** If your Mac is signed into the same iCloud account as this iPhone, macOS already knows the phone and may not list Clak Remote as a new keyboard. Run this **once** — it installs a tiny background helper that makes macOS discover the keyboard the moment Clak Remote is open on the iPhone, then removes itself. macOS reconnects automatically from then on:
+> **Clak Remote not showing up on the Mac?** If your Mac is signed into the same iCloud account as this iPhone, macOS already knows the phone and may not list Clak Remote as a new keyboard — and it can forget the keyboard again later. Run this **once** to install a tiny background helper that makes macOS discover the keyboard whenever it isn't picking it up:
 >
 > ```sh
 > # requires Xcode command-line tools: xcode-select --install
 > curl -fsSL https://raw.githubusercontent.com/sryo/clak/main/clak-remote-bootstrap.sh | bash
 > ```
 >
-> Click **Allow** if macOS asks to use Bluetooth, then open Clak Remote on the iPhone whenever — before or after, the order doesn't matter. To remove the helper before it finishes on its own, re-run the command with `| bash -s uninstall`.
+> Click **Allow** if macOS asks to use Bluetooth, then open Clak Remote on the iPhone whenever — before or after, the order doesn't matter. The helper stays installed and keeps watching, so you never have to run it again. To remove it, re-run the command with `| bash -s uninstall`.
 
 ## Usage
 

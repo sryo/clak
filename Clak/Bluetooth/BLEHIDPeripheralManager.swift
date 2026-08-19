@@ -68,6 +68,9 @@ final class BLEHIDPeripheralManager: NSObject {
     /// sizes sent later can never disagree.
     let reportMap: HIDReportMap
 
+    /// Whether our own Generic Attribute service (0x1801) joins the database.
+    let publishesGenericAttributeService: Bool
+
     private var peripheralManager: CBPeripheralManager!
 
     // Input Report characteristics, one per Report ID (keyboard / consumer / mouse)
@@ -183,11 +186,19 @@ final class BLEHIDPeripheralManager: NSObject {
     ///     restoration so the system relaunches the app when a bonded central
     ///     acts on our services after the app was jettisoned. Ignored on macOS
     ///     (unsupported there).
+    ///   - publishesGenericAttributeService: false where the host OS already
+    ///     runs a shared GATT server owning 0x1801. A second, app-owned Service
+    ///     Changed dies with the process, and a central that subscribed to it
+    ///     loses its re-discovery signal — so on iOS the system's copy is left
+    ///     to do the job alone. With this off, the Service Changed nudge below
+    ///     is inert: there is no characteristic of ours to indicate on.
     init(localName: String = Constants.appName,
          includeHorizontalScroll: Bool = false,
-         restoreIdentifier: String? = nil) {
+         restoreIdentifier: String? = nil,
+         publishesGenericAttributeService: Bool = true) {
         self.localName = localName
         self.reportMap = HIDReportMap(includeHorizontalScroll: includeHorizontalScroll)
+        self.publishesGenericAttributeService = publishesGenericAttributeService
         super.init()
 
         #if os(iOS)
@@ -242,6 +253,20 @@ final class BLEHIDPeripheralManager: NSObject {
     /// Compatibility alias — startAdvertising() now handles every state.
     func resumeAdvertising() {
         startAdvertising()
+    }
+
+    /// Rebuild the GATT database and advertise again, as a fresh launch would.
+    /// A host whose cached copy of our services predates them ignores the
+    /// advertisement indefinitely; re-publishing is what makes it look again.
+    /// Unlike teardownCompletely() this keeps the manager live, so it is safe
+    /// to call on a running session.
+    func republish() {
+        guard isPoweredOn else { return }
+        wantsAdvertising = true
+        if lifecycle == .advertising {
+            peripheralManager.stopAdvertising()
+        }
+        publishServices()
     }
 
     /// Stops advertising but keeps GATT services intact for fast reconnection.
@@ -394,7 +419,9 @@ final class BLEHIDPeripheralManager: NSObject {
         warmup.characteristics = []
         services.append(("_warmup", warmup))
 
-        services.append(("GATT", buildGenericAttributeService()))
+        if publishesGenericAttributeService {
+            services.append(("GATT", buildGenericAttributeService()))
+        }
         services.append(("HID", buildHIDService()))
         services.append(("DeviceInfo", buildDeviceInfoService()))
 
@@ -649,6 +676,16 @@ extension BLEHIDPeripheralManager: CBPeripheralManagerDelegate {
         // rebuilt from scratch on the next startAdvertising() — the bond
         // survives, and Service Changed covers any handle movement.
         let restoredServices = (dict[CBPeripheralManagerRestoredStateServicesKey] as? [CBMutableService]) ?? []
+
+        // The system may also have been advertising on our behalf. Since the
+        // GATT database is rebuilt from scratch, that advertisement is stale:
+        // it points at handles about to be torn down, and leaving it up makes
+        // the next start request fail as a duplicate.
+        if dict[CBPeripheralManagerRestoredStateAdvertisementDataKey] != nil {
+            peripheral.stopAdvertising()
+            Log.bluetooth.info("BLE: Dropped restored advertisement before re-publishing")
+        }
+
         Log.bluetooth.info("BLE: Restored by system (\(restoredServices.count) services) — will re-publish")
     }
     #endif
@@ -657,10 +694,16 @@ extension BLEHIDPeripheralManager: CBPeripheralManagerDelegate {
         advertisingRequestInFlight = false
 
         if let error {
-            advertisingCancelledInFlight = false
-            Log.bluetooth.error("BLE: Advertising failed: \(error.localizedDescription)")
-            delegate?.peripheralDidFail(.advertisingFailed(error.localizedDescription))
-            return
+            // "Advertising has already started" reports the state we asked for,
+            // so it takes the success path — surfacing it would replace a
+            // working "Advertising" status with a failure no one can act on.
+            guard (error as? CBError)?.code == .alreadyAdvertising else {
+                advertisingCancelledInFlight = false
+                Log.bluetooth.error("BLE: Advertising failed: \(error.localizedDescription)")
+                delegate?.peripheralDidFail(.advertisingFailed(error.localizedDescription))
+                return
+            }
+            Log.bluetooth.info("BLE: Advertising was already running — adopting it")
         }
 
         // stopAdvertisingOnly() (or a mid-publish subscription) raced the
@@ -840,6 +883,11 @@ extension BLEHIDPeripheralManager: CBPeripheralManagerDelegate {
     /// it re-discovers, instead of leaving typing silently dead until the user
     /// does "Forget This Device".
     private func nudgeStaleCentralIfNeeded(_ central: CBCentral) {
+        // Without our own Generic Attribute service there is nothing to
+        // indicate on: the host's system-owned 2A05 is the only one, and it
+        // isn't ours to send. Not a fault — see publishesGenericAttributeService.
+        guard publishesGenericAttributeService else { return }
+
         let centralID = central.identifier
         guard let session = sessions[centralID],
               !session.isConnected,
