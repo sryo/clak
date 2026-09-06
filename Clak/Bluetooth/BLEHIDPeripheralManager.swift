@@ -11,10 +11,16 @@ protocol BLEHIDPeripheralDelegate: AnyObject {
     func peripheralDidReceiveLEDState(_ ledByte: UInt8)
     /// The notification queue has drained — queued senders may push more reports.
     func peripheralIsReadyToSend()
+    /// The GATT database is being rebuilt: nothing is published until
+    /// peripheralDidPublishServices(). Fires on first start and every republish.
+    func peripheralWillPublishServices()
+    func peripheralDidPublishServices()
 }
 
 extension BLEHIDPeripheralDelegate {
     func peripheralIsReadyToSend() {}
+    func peripheralWillPublishServices() {}
+    func peripheralDidPublishServices() {}
 }
 
 /// BLE GATT peripheral implementing HID over GATT Profile (HOGP).
@@ -413,6 +419,7 @@ final class BLEHIDPeripheralManager: NSObject {
         lifecycle = .publishing
         setupGeneration += 1
         let generation = setupGeneration
+        delegate?.peripheralWillPublishServices()
 
         peripheralManager.removeAllServices()
 
@@ -486,6 +493,7 @@ final class BLEHIDPeripheralManager: NSObject {
     private func publishCompleted() {
         lifecycle = .published
         Log.bluetooth.info("BLE: All services published")
+        delegate?.peripheralDidPublishServices()
 
         if hasConnectedCentral {
             // A central subscribed mid-publish (bonded reconnect) — advertising

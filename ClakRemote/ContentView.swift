@@ -132,6 +132,11 @@ struct ContentView: View {
 private struct WaitingView: View {
     let controller: RemoteController
 
+    /// A Mac that already knows us subscribes about a second into the first
+    /// round, so a round that ran out means it isn't listening: from then on
+    /// the copy says what the app is doing about it.
+    private var isRetrying: Bool { (controller.retryWindow?.attempt ?? 0) > 0 }
+
     var body: some View {
         VStack(spacing: 14) {
             switch controller.status {
@@ -143,9 +148,25 @@ private struct WaitingView: View {
                     .font(.body)
                     .multilineTextAlignment(.center)
             default:
-                ProgressView()
-                Text(controller.status == .advertising ? "Waiting for your Mac" : "Starting up")
+                ConnectingRingView(
+                    completedSteps: BringUp.stepsDone(
+                        status: controller.status,
+                        bluetoothOn: controller.bluetoothOn,
+                        servicesPublished: controller.servicesPublished
+                    ),
+                    retryWindow: controller.retryWindow,
+                    symbol: "laptopcomputer"
+                )
+                Text(headline)
                     .font(.title3.weight(.semibold))
+                    .contentTransition(.opacity)
+                if isRetrying {
+                    Text("Clak Remote re-announces itself each time the ring closes, so a Mac that missed it looks again. If a pairing request appears here, confirm it.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Text("On your Mac, open Settings ▸ Bluetooth and connect to Clak Remote, then confirm the request that appears here.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -168,6 +189,14 @@ private struct WaitingView: View {
                 .buttonStyle(.borderedProminent)
                 .padding(.top, 6)
             }
+        }
+        .animation(.easeInOut(duration: 0.28), value: isRetrying)
+    }
+
+    private var headline: String {
+        switch controller.status {
+        case .advertising: isRetrying ? "Still waiting for your Mac" : "Waiting for your Mac"
+        default: "Starting up"
         }
     }
 }

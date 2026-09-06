@@ -68,6 +68,11 @@ final class RemoteController {
     private(set) var status: Status = .waitingForBluetooth
     private(set) var capsLockOn = false
 
+    /// The two bring-up milestones `status` doesn't carry, so the connecting
+    /// ring can show the app getting ready before the Mac has anything to see.
+    private(set) var bluetoothOn = false
+    private(set) var servicesPublished = false
+
     /// Set when the failure is Bluetooth permission — the UI offers a jump to Settings.
     private(set) var bluetoothPermissionDenied = false
 
@@ -86,6 +91,27 @@ final class RemoteController {
 
     /// HID modifier bits applied to (and cleared by) the next keystroke or click.
     private(set) var stickyModifiers: UInt8 = 0
+
+    /// One round of waiting for a host before the app re-announces itself.
+    /// A bonded Mac subscribes about a second into the first round (measured
+    /// 1.1 s), so a round that runs out is the signal that something is off.
+    struct RetryWindow: Equatable {
+        let start: Date
+        let duration: TimeInterval
+        /// Republishes already done this session; 0 is the first wait.
+        let attempt: Int
+
+        /// How far through the round `date` is, 0 to 1.
+        func progress(at date: Date) -> Double {
+            guard duration > 0 else { return 1 }
+            return min(max(date.timeIntervalSince(start) / duration, 0), 1)
+        }
+    }
+
+    /// The round currently running, so the UI can show how long until the
+    /// next re-announce. Nil while nothing is armed: not advertising,
+    /// backgrounded, or connected.
+    private(set) var retryWindow: RetryWindow?
 
     @ObservationIgnored
     private let peripheral = BLEHIDPeripheralManager(
@@ -115,8 +141,16 @@ final class RemoteController {
     /// Mac nobody is connecting to settles down instead of cycling forever.
     @ObservationIgnored
     private var republishCount = 0
-    private let firstRepublishDelay: TimeInterval = 8
-    private let maxRepublishDelay: TimeInterval = 120
+    private static let firstRepublishDelay: TimeInterval = 8
+    private static let maxRepublishDelay: TimeInterval = 120
+
+    /// 8 s, then doubling to a 120 s ceiling.
+    static func republishDelay(afterAttempts attempts: Int) -> TimeInterval {
+        min(firstRepublishDelay * pow(2, Double(attempts)), maxRepublishDelay)
+    }
+
+    @ObservationIgnored
+    private var advertisingStartedAt: Date?
 
     @ObservationIgnored
     private var droppedNoteClearTask: DispatchWorkItem?
@@ -194,12 +228,17 @@ final class RemoteController {
         republishTask?.cancel()
         republishTask = nil
 
-        guard peripheral.isAdvertising, !isBackgrounded else { return }
+        guard peripheral.isAdvertising, !isBackgrounded else {
+            retryWindow = nil
+            return
+        }
 
-        let delay = min(firstRepublishDelay * pow(2, Double(republishCount)), maxRepublishDelay)
+        let delay = Self.republishDelay(afterAttempts: republishCount)
+        retryWindow = RetryWindow(start: Date(), duration: delay, attempt: republishCount)
         let task = DispatchWorkItem { [weak self] in
             guard let self, self.peripheral.isAdvertising, !self.isBackgrounded else { return }
             self.republishCount += 1
+            Log.bluetooth.notice("Remote: no host after \(delay, format: .fixed(precision: 0), privacy: .public)s — republish #\(self.republishCount, privacy: .public)")
             // A host part-way through discovery or pairing would be broken by
             // the database going out from under it; give it another round.
             if self.peripheral.hasCentral {
@@ -210,6 +249,11 @@ final class RemoteController {
         }
         republishTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: task)
+    }
+
+    private func secondsSinceAdvertising() -> String {
+        guard let start = advertisingStartedAt else { return "before advertising" }
+        return String(format: "+%.1fs since advertising", Date().timeIntervalSince(start))
     }
 
     // MARK: - Keyboard
@@ -412,11 +456,21 @@ final class RemoteController {
 
 extension RemoteController: BLEHIDPeripheralDelegate {
     func peripheralDidPowerOn() {
+        bluetoothOn = true
         bluetoothPermissionDenied = false
         peripheral.startAdvertising()
     }
 
+    func peripheralWillPublishServices() {
+        servicesPublished = false
+    }
+
+    func peripheralDidPublishServices() {
+        servicesPublished = true
+    }
+
     func peripheralDidStartAdvertising() {
+        advertisingStartedAt = Date()
         status = .advertising
         syncRepublishTimer()
     }
@@ -429,6 +483,7 @@ extension RemoteController: BLEHIDPeripheralDelegate {
     }
 
     func peripheralDidConnect(central: CBCentral) {
+        Log.bluetooth.notice("Remote: connected \(self.secondsSinceAdvertising(), privacy: .public)")
         status = .connected
         republishCount = 0
         syncRepublishTimer()
@@ -445,6 +500,11 @@ extension RemoteController: BLEHIDPeripheralDelegate {
     }
 
     func peripheralDidFail(_ failure: BLEHIDPeripheralManager.Failure) {
+        if !failure.isRetryable {
+            // Radio or permission gone: the peripheral has dropped its database
+            bluetoothOn = false
+            servicesPublished = false
+        }
         status = .error(failure.message)
         bluetoothPermissionDenied = failure == .unauthorized
     }
