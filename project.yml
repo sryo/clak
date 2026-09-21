@@ -87,11 +87,14 @@ targets:
         embed: false
     postBuildScripts:
       - name: Sync VERSION into Info.plist
+        # App Store Connect wants a CFBundleVersion that rises with every
+        # upload of the same marketing version; BUILD_NUMBER supplies it,
+        # local builds fall back to VERSION
         script: |
           VERSION=$(tr -d '[:space:]' < "${SRCROOT}/VERSION")
           PLIST="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" "${PLIST}"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION}" "${PLIST}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER:-$VERSION}" "${PLIST}"
         basedOnDependencyAnalysis: false
 
   ClakTests:
