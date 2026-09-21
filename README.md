@@ -48,3 +48,7 @@ You already own great input devices. Use them everywhere.
 | Disconnect and reconnect | ⌘⇧D |
 | Media keys (prev / play-pause / next) | F7 / F8 / F9 |
 | Volume (mute / down / up) | F10 / F11 / F12 |
+
+## How it works
+
+Both apps implement the standard HID over GATT Profile with CoreBluetooth's peripheral role, which Apple doesn't document as possible. [What CoreBluetooth doesn't tell you about being a keyboard](docs/corebluetooth-hid-notes.md) covers the undocumented parts: the blocked HID service UUID, the descriptor iOS won't subscribe without, and why a Mac on your iCloud account can't see your iPhone's keyboard.
