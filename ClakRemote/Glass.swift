@@ -25,6 +25,17 @@ extension View {
         modifier(GlassPanel(cornerRadius: cornerRadius))
     }
 
+    /// The same glass on any shape, for panels that aren't rectangles.
+    @ViewBuilder
+    func glassPanel<S: Shape>(in shape: S) -> some View {
+        if #available(iOS 26, *) {
+            glassEffect(.regular, in: shape)
+        } else {
+            background(.ultraThinMaterial, in: shape)
+                .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 1))
+        }
+    }
+
     /// Groups nearby glass so it blends and morphs as one shape instead of
     /// animating as separate pieces. A no-op before iOS 26.
     @ViewBuilder
