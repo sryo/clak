@@ -1,9 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// Touch surface driving the Mac cursor: 1-finger drag moves, tap clicks,
-/// 2-finger drag scrolls (with fling momentum), 2-finger tap right-clicks,
-/// and tap-then-press-and-move drags with the button held.
+/// Touch surface driving the Mac: the Mac trackpad's gestures, recognized by
+/// `TrackpadGestureRecognizer` and sent as pointer, button and wheel reports,
+/// or as the shortcut macOS binds to the gesture when HID has no way to say it.
 struct TrackpadView: UIViewRepresentable {
     let controller: RemoteController
 
@@ -21,15 +21,14 @@ struct TrackpadView: UIViewRepresentable {
 final class TrackpadUIView: UIView {
     weak var controller: RemoteController?
 
+    private var recognizer = TrackpadGestureRecognizer()
     private var activeTouches: Set<UITouch> = []
-    private var sessionMaxTouches = 0
-    private var sessionStart: TimeInterval = 0
-    private var dragDistance: CGFloat = 0
+    private var deadlineWork: DispatchWorkItem?
 
     // Pointer
     private var pendingDelta: CGSize = .zero
     private var lastMoveSend: TimeInterval = 0
-    private var lastTouchTimestamp: TimeInterval = 0
+    private var lastPointerTimestamp: TimeInterval = 0
 
     // Scroll — accumulated in LINE units; whole ±1 ticks are sent because macOS
     // multiplies multi-line wheel deltas into jumps (its accel curve is rate-based)
@@ -47,21 +46,9 @@ final class TrackpadUIView: UIView {
     private var momentumAccY: CGFloat = 0
     private var lastMomentumTimestamp: TimeInterval = 0
 
-    private static let tapMaxDuration: TimeInterval = 0.3
-
-    // Tap-and-a-half: tap, then press and move. The same drag a Mac trackpad
-    // performs with "Enable dragging" turned on, so it needs no learning.
-    private var isDragging = false
-    private var lastTapEnd: TimeInterval = 0
-    private var dragReleaseWork: DispatchWorkItem?
-    /// How soon after a tap a press counts as the drag half of it.
-    private static let dragArmWindow: TimeInterval = 0.35
-    /// A drag survives lifts shorter than this, so the pointer can be
-    /// repositioned and the drag continued — the phone's surface is far
-    /// smaller than the screen it drives. Longer than this and it drops.
-    private static let dragClutchGrace: TimeInterval = 0.4
     private let dragHaptic = UIImpactFeedbackGenerator(style: .medium)
     private let dropHaptic = UIImpactFeedbackGenerator(style: .light)
+    private let gestureHaptic = UIImpactFeedbackGenerator(style: .rigid)
     private static let pointsPerScrollLine: CGFloat = 10
 
     // Velocity-based pointer acceleration: slow strokes get sub-1x gain for
@@ -93,6 +80,11 @@ final class TrackpadUIView: UIView {
         configureAccessibility()
     }
 
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        recognizer.surfaceWidth = bounds.width
+    }
+
     /// Without this the surface is invisible to VoiceOver: nothing else lives
     /// in the connected view, so the screen reads as empty. `allowsDirectInteraction`
     /// is what lets raw touches through — otherwise VoiceOver eats them and the
@@ -101,7 +93,7 @@ final class TrackpadUIView: UIView {
     private func configureAccessibility() {
         isAccessibilityElement = true
         accessibilityLabel = "Trackpad"
-        accessibilityHint = "Drag to move the pointer on your Mac. Tap to click, two fingers to scroll."
+        accessibilityHint = "Drag to move the pointer on your Mac. Tap to click, two fingers to scroll or pinch, three fingers to switch Spaces."
         accessibilityTraits = [.allowsDirectInteraction]
         accessibilityCustomActions = [
             UIAccessibilityCustomAction(name: "Click") { [weak self] _ in
@@ -113,11 +105,11 @@ final class TrackpadUIView: UIView {
                 return true
             },
             UIAccessibilityCustomAction(name: "Start drag") { [weak self] _ in
-                self?.beginDrag()
+                self?.controller?.mouseDown(button: MouseButton.left)
                 return true
             },
             UIAccessibilityCustomAction(name: "Drop") { [weak self] _ in
-                self?.endDrag()
+                self?.controller?.mouseUp()
                 return true
             },
         ]
@@ -142,74 +134,46 @@ final class TrackpadUIView: UIView {
         super.willMove(toWindow: newWindow)
         if newWindow == nil {
             cancelMomentum()
-            endDrag()
+            activeTouches = []
+            apply(recognizer.reset())
+            // Also covers a drag started from the VoiceOver action, which the
+            // recognizer never saw.
+            controller?.mouseUp()
         }
     }
 
     // MARK: - Touches
 
+    private static func id(of touch: UITouch) -> Int {
+        ObjectIdentifier(touch).hashValue
+    }
+
+    private func samples(_ touches: Set<UITouch>) -> [Int: CGPoint] {
+        Dictionary(uniqueKeysWithValues: touches.map { (Self.id(of: $0), $0.location(in: self)) })
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        let caughtFling = momentumLink != nil
         cancelMomentum()
+        let timestamp = touches.first?.timestamp ?? ProcessInfo.processInfo.systemUptime
         if activeTouches.isEmpty {
-            sessionMaxTouches = 0
-            sessionStart = ProcessInfo.processInfo.systemUptime
-            dragDistance = 0
             pendingDelta = .zero
             scrollAccX = 0
             scrollAccY = 0
-            lastTouchTimestamp = touches.first?.timestamp ?? 0
-
-            if isDragging {
-                // Coming back mid-clutch: keep the button down.
-                dragReleaseWork?.cancel()
-                dragReleaseWork = nil
-            } else if sessionStart - lastTapEnd < Self.dragArmWindow {
-                beginDrag()
-            }
-        }
-        activeTouches.formUnion(touches)
-        if activeTouches.count >= 2, sessionMaxTouches < 2 {
             scrollVelocityX = 0
             scrollVelocityY = 0
-            lastScrollTimestamp = touches.first?.timestamp ?? 0
+            lastPointerTimestamp = timestamp
+            lastScrollTimestamp = timestamp
         }
-        sessionMaxTouches = max(sessionMaxTouches, activeTouches.count)
+        activeTouches.formUnion(touches)
+        apply(recognizer.touchesBegan(samples(touches), at: timestamp, interruptsMomentum: caughtFling))
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        let deltas = touches.map { touch -> CGPoint in
-            let current = touch.location(in: self)
-            let previous = touch.previousLocation(in: self)
-            return CGPoint(x: current.x - previous.x, y: current.y - previous.y)
-        }
-        guard !deltas.isEmpty else { return }
-        let avgX = deltas.map(\.x).reduce(0, +) / CGFloat(deltas.count)
-        let avgY = deltas.map(\.y).reduce(0, +) / CGFloat(deltas.count)
-        dragDistance += abs(avgX) + abs(avgY)
-
-        let timestamp = touches.first?.timestamp ?? 0
-
-        // Branch on the session max, not the live count: fingers lift
-        // non-simultaneously, so a scroll session must never fall through to
-        // the pointer branch when only the last finger remains.
-        if sessionMaxTouches >= 2 {
-            // Natural scrolling: fingers up = content moves up = wheel down
-            let dt = max(timestamp - lastScrollTimestamp, 0.004)
-            lastScrollTimestamp = timestamp
-            scrollAccX += -avgX / Self.pointsPerScrollLine
-            scrollAccY += -avgY / Self.pointsPerScrollLine
-            scrollVelocityX = 0.8 * (-avgX / CGFloat(dt)) + 0.2 * scrollVelocityX
-            scrollVelocityY = 0.8 * (-avgY / CGFloat(dt)) + 0.2 * scrollVelocityY
-        } else {
-            let dt = max(timestamp - lastTouchTimestamp, 0.004)
-            lastTouchTimestamp = timestamp
-            let speed = hypot(avgX, avgY) / CGFloat(dt)
-            let normalized = min(speed / Self.accelMaxSpeed, 1)
-            let gain = Self.accelMinGain
-                + (Self.accelMaxGain - Self.accelMinGain) * pow(normalized, Self.accelExponent)
-            pendingDelta.width += avgX * Constants.Trackpad.sensitivity * gain
-            pendingDelta.height += avgY * Constants.Trackpad.sensitivity * gain
-        }
+        let timestamp = touches.first?.timestamp ?? ProcessInfo.processInfo.systemUptime
+        // Every finger down, not just the ones that moved: a finger held
+        // still is half of a pinch.
+        apply(recognizer.touchesMoved(samples(activeTouches), at: timestamp), at: timestamp)
 
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastMoveSend >= Constants.Trackpad.moveReportInterval else { return }
@@ -219,65 +183,129 @@ final class TrackpadUIView: UIView {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         activeTouches.subtract(touches)
-        guard activeTouches.isEmpty else { return }
-        flushPending()
-
-        let now = ProcessInfo.processInfo.systemUptime
-        let duration = now - sessionStart
-
-        if isDragging {
-            scheduleDrop()
-            return
+        let timestamp = touches.first?.timestamp ?? ProcessInfo.processInfo.systemUptime
+        if activeTouches.isEmpty {
+            flushPending()
         }
-
-        if dragDistance < Constants.Trackpad.tapThreshold && duration < Self.tapMaxDuration {
-            // 1-finger tap = left click, 2-finger tap = right click
-            controller?.mouseClick(button: sessionMaxTouches >= 2 ? MouseButton.right : MouseButton.left)
-            // Only a one-finger tap can be the first half of a drag.
-            lastTapEnd = sessionMaxTouches >= 2 ? 0 : now
-            return
-        }
-
-        if sessionMaxTouches >= 2 {
-            startMomentumIfFlung(liftTimestamp: touches.first?.timestamp ?? 0)
-        }
-    }
-
-    // MARK: - Drag
-
-    private func beginDrag() {
-        isDragging = true
-        lastTapEnd = 0
-        controller?.mouseDown(button: MouseButton.left)
-        dragHaptic.impactOccurred()
-    }
-
-    /// Held through a brief lift so the finger can be repositioned.
-    private func scheduleDrop() {
-        dragReleaseWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.endDrag() }
-        dragReleaseWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.dragClutchGrace, execute: work)
-    }
-
-    private func endDrag() {
-        dragReleaseWork?.cancel()
-        dragReleaseWork = nil
-        guard isDragging else { return }
-        isDragging = false
-        controller?.mouseUp()
-        dropHaptic.impactOccurred()
+        apply(recognizer.touchesEnded(touches.map(Self.id(of:)), at: timestamp), at: timestamp)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        endDrag()
-        lastTapEnd = 0
         activeTouches.subtract(touches)
+        let timestamp = touches.first?.timestamp ?? ProcessInfo.processInfo.systemUptime
+        apply(recognizer.touchesCancelled(touches.map(Self.id(of:)), at: timestamp))
         if activeTouches.isEmpty {
             pendingDelta = .zero
             scrollAccX = 0
             scrollAccY = 0
         }
+    }
+
+    // MARK: - Actions
+
+    private func apply(_ actions: [TrackpadGestureRecognizer.Action], at timestamp: TimeInterval = 0) {
+        for action in actions {
+            apply(action, at: timestamp)
+        }
+        scheduleDeadline()
+    }
+
+    private func apply(_ action: TrackpadGestureRecognizer.Action, at timestamp: TimeInterval) {
+        switch action {
+        case .pointer, .scroll: break
+        default: Log.hid.debug("Trackpad gesture: \(String(describing: action), privacy: .public)")
+        }
+        guard let controller else { return }
+        switch action {
+        case .pointer(let dx, let dy):
+            let dt = max(timestamp - lastPointerTimestamp, 0.004)
+            lastPointerTimestamp = timestamp
+            let speed = hypot(dx, dy) / CGFloat(dt)
+            let normalized = min(speed / Self.accelMaxSpeed, 1)
+            let gain = Self.accelMinGain
+                + (Self.accelMaxGain - Self.accelMinGain) * pow(normalized, Self.accelExponent)
+            pendingDelta.width += dx * Constants.Trackpad.sensitivity * gain
+            pendingDelta.height += dy * Constants.Trackpad.sensitivity * gain
+
+        case .scroll(let dx, let dy):
+            // Natural scrolling: fingers up = content moves up = wheel down
+            let dt = max(timestamp - lastScrollTimestamp, 0.004)
+            lastScrollTimestamp = timestamp
+            scrollAccX += -dx / Self.pointsPerScrollLine
+            scrollAccY += -dy / Self.pointsPerScrollLine
+            scrollVelocityX = 0.8 * (-dx / CGFloat(dt)) + 0.2 * scrollVelocityX
+            scrollVelocityY = 0.8 * (-dy / CGFloat(dt)) + 0.2 * scrollVelocityY
+
+        case .scrollEnded:
+            startMomentumIfFlung(liftTimestamp: timestamp)
+
+        case .click(let button):
+            controller.mouseClick(button: button == .left ? MouseButton.left : MouseButton.right)
+
+        case .doubleClick:
+            controller.mouseDoubleClick()
+
+        case .buttonDown:
+            controller.mouseDown(button: MouseButton.left)
+            dragHaptic.impactOccurred()
+
+        case .buttonUp:
+            controller.mouseUp()
+            dropHaptic.impactOccurred()
+
+        case .swipe(_, let direction):
+            // Content follows the fingers, as on the Mac: swiping left brings
+            // in the Space to the right.
+            switch direction {
+            case .left: controller.sendShortcut(HIDKey.rightArrow, modifiers: HIDModifier.control)
+            case .right: controller.sendShortcut(HIDKey.leftArrow, modifiers: HIDModifier.control)
+            case .up: controller.tapConsumer(ConsumerUsage.missionControl)
+            case .down: controller.sendShortcut(HIDKey.downArrow, modifiers: HIDModifier.control)
+            }
+            gestureHaptic.impactOccurred()
+
+        case .zoom(let step):
+            controller.sendShortcut(step > 0 ? HIDKey.equal : HIDKey.minus, modifiers: HIDModifier.command)
+            gestureHaptic.impactOccurred(intensity: 0.6)
+
+        case .rotate(let step):
+            // Preview's and Photos' rotate commands.
+            controller.sendShortcut(step > 0 ? HIDKey.r : HIDKey.l, modifiers: HIDModifier.command)
+            gestureHaptic.impactOccurred()
+
+        case .lookUp:
+            controller.sendShortcut(HIDKey.d, modifiers: HIDModifier.control | HIDModifier.command)
+            gestureHaptic.impactOccurred()
+
+        case .gatherAll:
+            controller.tapConsumer(ConsumerUsage.launchpad)
+            gestureHaptic.impactOccurred()
+
+        case .spreadAll:
+            // Show Desktop's default shortcut. A third-party keyboard's F11
+            // arrives as a real F11, never as a media key.
+            controller.sendShortcut(HIDKey.f11, modifiers: 0)
+            gestureHaptic.impactOccurred()
+
+        case .edgeSwipeFromRight:
+            controller.sendGlobeShortcut(HIDKey.n)
+            gestureHaptic.impactOccurred()
+        }
+    }
+
+    /// The drag's clutch grace runs out on the recognizer's clock, so wake
+    /// it when the deadline passes.
+    private func scheduleDeadline() {
+        deadlineWork?.cancel()
+        deadlineWork = nil
+        guard let deadline = recognizer.nextDeadline else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.apply(self.recognizer.tick(at: ProcessInfo.processInfo.systemUptime))
+        }
+        deadlineWork = work
+        let delay = max(deadline - ProcessInfo.processInfo.systemUptime, 0) + 0.005
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     // MARK: - Momentum

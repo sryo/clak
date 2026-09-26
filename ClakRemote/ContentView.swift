@@ -14,7 +14,14 @@ struct ContentView: View {
 
     private var isCompact: Bool { verticalSizeClass == .compact }
 
-    private var isConnected: Bool { controller.status == .connected }
+    private var isConnected: Bool {
+        #if DEBUG
+        // The simulator can't be a BLE peripheral; this puts the surface up
+        // anyway so touch handling can be driven there.
+        if ProcessInfo.processInfo.arguments.contains("-ShowTrackpadUnconnected") { return true }
+        #endif
+        return controller.status == .connected
+    }
 
     @State private var idleClock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 

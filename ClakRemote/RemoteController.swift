@@ -13,6 +13,13 @@ enum HIDKey {
     static let leftArrow: UInt8 = 0x50
     static let downArrow: UInt8 = 0x51
     static let upArrow: UInt8 = 0x52
+    static let d: UInt8 = 0x07
+    static let l: UInt8 = 0x0F
+    static let n: UInt8 = 0x11
+    static let r: UInt8 = 0x15
+    static let minus: UInt8 = 0x2D
+    static let equal: UInt8 = 0x2E
+    static let f11: UInt8 = 0x44
 }
 
 enum MouseButton {
@@ -39,6 +46,10 @@ enum ConsumerUsage {
     // QMK/Keychron-proven Mac mappings
     static let missionControl: UInt16 = 0x029F // AC Desktop Show All Windows
     static let spotlight: UInt16 = 0x0221      // AC Search
+    static let launchpad: UInt16 = 0x02A0      // Keychron-proven; opens Apps on macOS 26
+    /// AC Next Keyboard Layout Select, which macOS reads as the Globe key
+    /// from any device that declares it (our 0x000–0x3FF range does).
+    static let globe: UInt16 = 0x029D
     /// F5 on a Mac keyboard. Apple's own key is on its vendor page (0xFF01),
     /// which macOS has filtered by vendor ID since Big Sur, so a third-party
     /// keyboard can't send it. This is the standard Consumer equivalent and
@@ -300,6 +311,24 @@ final class RemoteController {
         enqueueKeystroke(keyCode: keyCode, modifiers: consumeStickyModifiers())
     }
 
+    /// A fixed system shortcut, sent as is. Sticky modifiers are left for
+    /// the key they were latched for.
+    func sendShortcut(_ keyCode: UInt8, modifiers: UInt8) {
+        enqueueKeystroke(keyCode: keyCode, modifiers: modifiers)
+    }
+
+    /// A Globe-key shortcut (Globe+N and friends): Globe is a consumer
+    /// usage, so it's held across the keystroke in the other report.
+    func sendGlobeShortcut(_ keyCode: UInt8) {
+        noteInteraction()
+        guard sendQueue.count + 4 <= maxQueuedSends else { return }
+        sendQueue.append(.consumer(ConsumerUsage.globe))
+        sendQueue.append(.keyboard(modifiers: 0, keyCode: keyCode))
+        sendQueue.append(.keyboard(modifiers: 0, keyCode: nil))
+        sendQueue.append(.consumer(0))
+        drainSendQueue()
+    }
+
     func toggleModifier(_ bit: UInt8) {
         noteInteraction()
         stickyModifiers ^= bit
@@ -388,8 +417,9 @@ final class RemoteController {
             let acceptedImmediately: Bool
             switch sendQueue.removeFirst() {
             case .keyboard(let modifiers, let keyCode):
+                // A keystroke mid-drag must not let go of the drag's modifiers.
                 acceptedImmediately = peripheral.sendKeyboardReport(
-                    modifiers: modifiers,
+                    modifiers: modifiers | dragModifiers,
                     keyCodes: keyCode.map { [$0] } ?? []
                 )
             case .consumer(let usage):
@@ -410,6 +440,10 @@ final class RemoteController {
     /// dragging a file was impossible.
     @ObservationIgnored
     private var heldMouseButtons: UInt8 = 0
+    /// Sticky modifiers a drag picked up, held until it drops, so an
+    /// Option-drag copies and a Command-drag moves without switching Spaces.
+    @ObservationIgnored
+    private var dragModifiers: UInt8 = 0
 
     func mouseMove(dx: Int8, dy: Int8) {
         noteInteraction()
@@ -418,6 +452,12 @@ final class RemoteController {
 
     func mouseDown(button: UInt8) {
         noteInteraction()
+        if heldMouseButtons == 0 {
+            dragModifiers = consumeStickyModifiers()
+            if dragModifiers != 0 {
+                peripheral.sendKeyboardReport(modifiers: dragModifiers, keyCodes: [])
+            }
+        }
         heldMouseButtons |= button
         peripheral.sendMouseReport(buttons: heldMouseButtons, dx: 0, dy: 0, wheel: 0)
     }
@@ -427,11 +467,24 @@ final class RemoteController {
         noteInteraction()
         heldMouseButtons = 0
         peripheral.sendMouseReport(buttons: 0, dx: 0, dy: 0, wheel: 0)
+        if dragModifiers != 0 {
+            dragModifiers = 0
+            peripheral.sendKeyRelease()
+        }
     }
 
     func mouseScroll(wheel: Int8, pan: Int8 = 0) {
         noteInteraction()
         peripheral.sendMouseReport(buttons: heldMouseButtons, dx: 0, dy: 0, wheel: wheel, pan: pan)
+    }
+
+    /// Two clicks far enough apart that the Mac sees two presses, and close
+    /// enough to count as one double-click.
+    func mouseDoubleClick() {
+        mouseClick(button: MouseButton.left)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            self?.mouseClick(button: MouseButton.left)
+        }
     }
 
     /// Clicks consume sticky modifiers and hold them across the click, so
@@ -442,9 +495,11 @@ final class RemoteController {
         if modifiers != 0 {
             peripheral.sendKeyboardReport(modifiers: modifiers, keyCodes: [])
         }
-        peripheral.sendMouseReport(buttons: button, dx: 0, dy: 0, wheel: 0)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [peripheral] in
-            peripheral.sendMouseReport(buttons: 0, dx: 0, dy: 0, wheel: 0)
+        // Clicked on top of whatever is held, so a click mid-drag (the
+        // VoiceOver action) doesn't drop it.
+        peripheral.sendMouseReport(buttons: heldMouseButtons | button, dx: 0, dy: 0, wheel: 0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self, peripheral] in
+            peripheral.sendMouseReport(buttons: self?.heldMouseButtons ?? 0, dx: 0, dy: 0, wheel: 0)
             if modifiers != 0 {
                 peripheral.sendKeyRelease()
             }
