@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clak Privacy</title>
+  <meta name="description" content="Clak and Clak Remote collect nothing. Nothing leaves your devices except the keystrokes you send.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #ffffff;
+      --bg-secondary: #f5f5f5;
+      --text-primary: #222;
+      --text-secondary: #666;
+      --accent: #0a84ff;
+      --border: #e0e0e0;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-primary: #1e1e1e;
+        --bg-secondary: #2a2a2a;
+        --text-primary: #f0f0f0;
+        --text-secondary: #a0a0a0;
+        --border: #3a3a3a;
+      }
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+    }
+
+    .container { max-width: 720px; margin: 0 auto; padding: 0 1.5rem; }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .back { display: inline-block; margin-top: 2rem; font-size: 0.9rem; font-weight: 500; }
+
+    h1 {
+      margin-top: 72px;
+      font-size: 3rem;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+    }
+    .lede {
+      margin: 1rem 0 2.5rem;
+      font-size: 1.35rem;
+      font-weight: 500;
+      line-height: 1.5;
+    }
+
+    .points { list-style: none; display: grid; gap: 10px; }
+    .points li {
+      padding: 16px 18px;
+      background: var(--bg-secondary);
+      border-radius: 12px;
+      color: var(--text-secondary);
+    }
+    .points strong { color: var(--text-primary); font-weight: 700; }
+
+    .fine {
+      margin-top: 2rem;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+    .fine p + p { margin-top: 0.5rem; }
+
+    .footer { padding: 40px 0; text-align: center; }
+    .footer__bottom {
+      padding-top: 2rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+    }
+
+    @media (max-width: 640px) {
+      h1 { margin-top: 48px; font-size: 2.25rem; }
+      .lede { font-size: 1.1rem; }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <a class="back" href="./">← Clak</a>
+
+    <h1>Privacy</h1>
+    <p class="lede">Clak collects nothing. Nothing leaves your devices except the keystrokes you send.</p>
+
+    <ul class="points">
+      <li><strong>No internet.</strong> Neither app ever connects to a network. There's no code for it.</li>
+      <li><strong>No accounts, analytics, ads or tracking.</strong></li>
+      <li><strong>Your typing goes only over Bluetooth</strong> to the device you paired, like a physical keyboard. It isn't recorded or stored.</li>
+      <li><strong>What stays on your device:</strong> your settings, like shortcuts and preferences. Deleting the app deletes them.</li>
+      <li><strong>Clipboard:</strong> the Mac app reads it only when you use Paste to Device.</li>
+      <li><strong>Permissions:</strong> Bluetooth, to act as a keyboard. On the Mac also Input Monitoring and Accessibility, to capture keys while you forward them. You can revoke them anytime in System Settings.</li>
+    </ul>
+
+    <div class="fine">
+      <p>This applies to Clak for macOS and Clak Remote for iOS, both made by sryo. Since no data is collected from anyone, none is collected from children. If this ever changes, this page changes first and the release notes will say so. The source is public, so you can check every line of this yourself.</p>
+      <p>Questions: <a href="https://github.com/sryo/clak/issues">open an issue on GitHub</a>. Last updated September 27, 2026.</p>
+    </div>
+
+    <footer class="footer">
+      <div class="footer__bottom">© 2026 sryo</div>
+    </footer>
+  </main>
+</body>
+</html>

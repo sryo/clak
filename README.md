@@ -52,3 +52,7 @@ You already own great input devices. Use them everywhere.
 ## How it works
 
 Both apps implement the standard HID over GATT Profile with CoreBluetooth's peripheral role, which Apple doesn't document as possible. [What CoreBluetooth doesn't tell you about being a keyboard](docs/corebluetooth-hid-notes.md) covers the undocumented parts: the blocked HID service UUID, the descriptor iOS won't subscribe without, and why a Mac on your iCloud account can't see your iPhone's keyboard.
+
+## Privacy
+
+Neither app collects anything or touches the network. Keystrokes go only over Bluetooth to the device you paired. [Full policy](https://sryo.github.io/clak/privacy.html).
