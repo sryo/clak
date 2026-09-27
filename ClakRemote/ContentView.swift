@@ -59,6 +59,7 @@ struct ContentView: View {
         .padding(.top, 10)
         .padding(.bottom, keyboardFocus.isVisible ? 8 : ControlMetrics.barBottom(compact: isCompact))
         .background(Color.black)
+        .dialOverlay()
         .preferredColorScheme(.dark)
         .overlay {
             // Barely rendered rather than hidden: a field at zero opacity, or

@@ -6,19 +6,6 @@ enum ControlLayer {
     case keys
 }
 
-/// Clips the layer pager horizontally while leaving it open above, so the
-/// neighbouring layer stays hidden but a pulled key can still grow out of the
-/// bar.
-private struct SidewaysClip: Shape {
-    /// Enough for the tallest column a key can grow, with room to spare.
-    private static let openAbove = ControlMetrics.maxPullReach * 2
-
-    func path(in rect: CGRect) -> Path {
-        Path(CGRect(x: rect.minX, y: rect.minY - Self.openAbove,
-                    width: rect.width, height: rect.height + Self.openAbove))
-    }
-}
-
 /// The control layer: one piece of glass floating over the trackpad.
 ///
 /// The grammar is one rule — touch a key and you get the key, touch the
@@ -39,14 +26,14 @@ struct ControlBar: View {
     /// Travel added by a peek, alongside the finger's own.
     @State private var peekOffset: CGFloat = 0
     @State private var peekBump: CGFloat = 0
-    @State private var pullTug: CGFloat = 0
+    @State private var pullTwist: Double = 0
 
     /// Live horizontal travel of the layer pager while the handle is dragged.
     @State private var dragOffset: CGFloat = 0
     @State private var barWidth: CGFloat = 0
     /// Locked on the first meaningful movement so one drag can't both switch
     /// layer and expand the panel.
-    @State private var gestureAxis: PullAxis?
+    @State private var gestureAxis: Axis?
     /// Reverts by itself when a drag is cancelled — the only signal SwiftUI
     /// gives, since onEnded isn't delivered for an interrupted gesture.
     @GestureState private var isDraggingHandle = false
@@ -109,8 +96,8 @@ struct ControlBar: View {
             withAnimation(out) { peekBump = 12 }
             after(0.34) { withAnimation(back) { peekBump = 0 } }
         case .pullKey:
-            withAnimation(out) { pullTug = -8 }
-            after(0.30) { withAnimation(back) { pullTug = 0 } }
+            withAnimation(out) { pullTwist = 18 }
+            after(0.30) { withAnimation(back) { pullTwist = 0 } }
         }
     }
 
@@ -139,7 +126,9 @@ struct ControlBar: View {
             .onChange(of: geo.size.width, initial: true) { _, width in barWidth = width }
         }
         .frame(height: pagerHeight + peekBump)
-        .clipShape(SidewaysClip())
+        // Keeps the neighbouring layer hidden. A turning key's ring is drawn
+        // above the whole screen, so nothing needs to escape this.
+        .clipped()
     }
 
     private var layerIndex: CGFloat {
@@ -321,8 +310,8 @@ struct ControlBar: View {
         HStack(spacing: 0) {
             key("backward.fill", "Previous", size: 28) { controller.tapConsumer(ConsumerUsage.previous) }
 
-            // Tap plays or pauses; pulled sideways it becomes the scrubber.
-            PullKey(axis: .horizontal, tug: pullTug) { step in
+            // Tap plays or pauses; turned, it becomes the scrubber.
+            PullKey(allowsFine: false, twist: .degrees(pullTwist)) { step, _ in
                 coach.markDiscovered(.pullKey)
                 controller.seek(step)
             } onTap: {
@@ -332,31 +321,31 @@ struct ControlBar: View {
             }
             .frame(maxWidth: .infinity)
             .accessibilityLabel("Play or pause")
-            .accessibilityHint("Drag sideways to seek")
+            .accessibilityHint("Drag round the key to seek")
 
             key("forward.fill", "Next", size: 28) { controller.tapConsumer(ConsumerUsage.next) }
 
             separator
 
-            PullKey(axis: .vertical, tug: pullTug) { step in
+            PullKey(twist: .degrees(pullTwist)) { step, fine in
                 coach.markDiscovered(.pullKey)
-                controller.tapConsumer(step > 0 ? ConsumerUsage.brightnessUp : ConsumerUsage.brightnessDown)
+                controller.tapConsumer(step > 0 ? ConsumerUsage.brightnessUp : ConsumerUsage.brightnessDown, fine: fine)
             } label: {
                 Image(systemName: "sun.max").font(.system(size: 27))
             }
             .accessibilityLabel("Brightness")
-            .accessibilityHint("Drag up or down to change")
+            .accessibilityHint("Drag round the key to change")
 
-            PullKey(axis: .vertical, tug: pullTug, trackAlignment: .bottomTrailing) { step in
+            PullKey(twist: .degrees(pullTwist)) { step, fine in
                 coach.markDiscovered(.pullKey)
-                controller.tapConsumer(step > 0 ? ConsumerUsage.volumeUp : ConsumerUsage.volumeDown)
+                controller.tapConsumer(step > 0 ? ConsumerUsage.volumeUp : ConsumerUsage.volumeDown, fine: fine)
             } onTap: {
                 controller.tapConsumer(ConsumerUsage.mute)
             } label: {
                 Image(systemName: "speaker.wave.2").font(.system(size: 27))
             }
             .accessibilityLabel("Volume")
-            .accessibilityHint("Drag up or down to change, tap to mute")
+            .accessibilityHint("Drag round the key to change, tap to mute")
         }
     }
 

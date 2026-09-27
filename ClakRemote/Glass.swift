@@ -60,9 +60,6 @@ enum ControlMetrics {
     static func barBottom(compact: Bool) -> CGFloat { compact ? 12 : 44 }
     static let barRadius: CGFloat = 34
     static let surfaceRadius: CGFloat = 30
-    /// How far above the bar a pulled key may reach. SidewaysClip must stay
-    /// open at least this far, or a column comes out with a flat top.
-    static let maxPullReach: CGFloat = 396
     static func keyHeight(compact: Bool) -> CGFloat {
         compact ? 48 : 66
     }
@@ -74,9 +71,7 @@ enum ControlMetrics {
     static let grabberWidth: CGFloat = 40
     static let grabberHeight: CGFloat = 5
 
-    /// The travel one step of a pulled key costs, matched to the haptic tick.
-    static let pointsPerStep: CGFloat = 14
-    /// Movement under this in both axes is a tap, not a pull.
+    /// Movement under this in both axes is a tap, not a turn.
     static let tapSlop: CGFloat = 6
 }
 

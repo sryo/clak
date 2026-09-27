@@ -1,119 +1,164 @@
 import CoreGraphics
 
-/// Turns a pull key's drag into steps by following the finger like a tape.
+/// Turns a drag off a key into dial steps, around the point where the finger
+/// landed.
 ///
-/// The track starts out facing along the key's axis, and every movement counts
-/// by how far it went that way, one step per `pointsPerStep` as a straight
-/// pull always has. The facing bends with the finger's path, so curling a pull
-/// round into a circle of any size just keeps counting: a line is a circle
-/// with a very big radius, and nothing has to decide when one became the
-/// other. Going back along the path counts down; moving across it counts
-/// nothing.
+/// The value follows the finger's angle round that centre: clockwise raises,
+/// counterclockwise lowers, one step per `stepAngle` at any distance. Moving
+/// straight out or in never changes it. What the distance changes is how
+/// finely it lands: near the key it lands on whole steps only, and past
+/// `fineRadius` on every quarter too, the finest step macOS has for volume and
+/// brightness.
 ///
-/// It also reports how tightly the path bends, so the track on screen can take
-/// the gesture's shape. Pure geometry, no UIKit and no clock, so every path
-/// can be replayed in a unit test.
+/// Pure geometry, no UIKit and no clock, so every path can be replayed in a
+/// unit test.
 struct PullStepper {
-    /// The facing is read from the chord over this much of the recent path, so
-    /// touch jitter can't steer it.
-    static let chordLength: CGFloat = 8
-    /// How far off the facing, either way along it, the path may head and
-    /// still bend it. Past this the finger is moving across the track.
-    static let followAngle: CGFloat = 75 * .pi / 180
-    /// The tightest circle a finger draws. The facing turns no faster than
-    /// this bend, which keeps a trembling pull from steering it.
-    static let tightestRadius: CGFloat = 10
-    /// Travel over which the curvature settles on a new value.
-    static let curvatureSettling: CGFloat = 12
-
-    let axis: PullAxis
-    private let pointsPerStep: CGFloat
-
-    /// Net steps since the finger landed, positive = up / right to begin with.
-    private(set) var steps = 0
-    /// Signed 1/radius of the path in 1/points, positive when the track bends
-    /// clockwise on screen, 0 on a straight line.
-    private(set) var curvature: CGFloat = 0
-
-    private var facing: CGVector
-    private var travel: CGFloat = 0
-    private var steppedTravel: CGFloat = 0
-    private var lastPoint = CGPoint.zero
-    private var distance: CGFloat = 0
-    /// Recent points with the path distance at which each was reached, back to
-    /// the last one at least a chord behind.
-    private var trail: [(point: CGPoint, distance: CGFloat)] = [(.zero, 0)]
-
-    init(axis: PullAxis, pointsPerStep: CGFloat = ControlMetrics.pointsPerStep) {
-        self.axis = axis
-        self.pointsPerStep = pointsPerStep
-        // Screen y grows downward, so up is -y.
-        facing = axis == .vertical ? CGVector(dx: 0, dy: -1) : CGVector(dx: 1, dy: 0)
+    /// One step for the Mac to take: a whole one, or a quarter.
+    struct Step: Equatable {
+        /// +1 clockwise, -1 counterclockwise.
+        let direction: Int
+        let isQuarter: Bool
     }
 
-    /// Feeds the finger's translation from where it landed, in screen
-    /// coordinates. Returns the steps this movement crossed.
-    mutating func move(to translation: CGSize) -> Int {
-        let point = CGPoint(x: translation.width, y: translation.height)
-        let dx = point.x - lastPoint.x, dy = point.y - lastPoint.y
-        let moved = hypot(dx, dy)
-        guard moved > 0 else { return 0 }
+    /// A half turn over the top of the key is the Mac's whole volume or
+    /// brightness range, 16 steps.
+    static let stepAngle: CGFloat = .pi / 16
+    static let quarterAngle: CGFloat = stepAngle / 4
+    /// Inside this radius an angle swings wildly for a tiny movement, so it
+    /// counts for nothing; it also holds the tap slop.
+    static let deadZone: CGFloat = 24
+    /// Past this far out the dial also lands on quarters.
+    static let fineRadius: CGFloat = 120
+    /// How far back in a finger must come to leave the fine zone once in it,
+    /// so hovering at the edge doesn't flicker between the two.
+    static let fineOverlap: CGFloat = 10
 
-        let along = dx * facing.dx + dy * facing.dy
-        travel += along
-        lastPoint = point
-        distance += moved
-        trail.append((point, distance))
-        while trail.count > 1, trail[1].distance <= distance - Self.chordLength {
-            trail.removeFirst()
+    /// False for a value with no quarter step, like seeking.
+    let allowsFine: Bool
+
+    init(allowsFine: Bool = true) {
+        self.allowsFine = allowsFine
+    }
+
+    /// Net value since the finger landed, in quarter steps, positive =
+    /// clockwise.
+    private(set) var quarters = 0
+    /// Whether the dial is landing on quarters right now.
+    private(set) var isFine = false
+    /// How far the finger is from the centre.
+    private(set) var radius: CGFloat = 0
+    /// The finger's angle round the centre in radians, in screen coordinates
+    /// (increasing is clockwise); nil while it is in the dead middle.
+    private(set) var angle: CGFloat?
+    /// Net turn since the finger landed, in radians, clockwise positive.
+    private(set) var turned: CGFloat = 0
+    /// Turn, in quarters, that has been set aside rather than paid out.
+    /// Near the key the value waits up to three quarters behind the finger
+    /// for the next whole step; moving out then must not hand those over at
+    /// once, since pulling out never changes the value.
+    private var bias: CGFloat = 0
+
+    /// Where the turn began, carried along so that it stays put on screen
+    /// while the finger goes round: the start of the ring's scale.
+    var startAngle: CGFloat? { angle.map { $0 - turned } }
+
+    /// The value as whole steps and quarters, signed: +3¼, -½, 0.
+    static func readout(quarters: Int) -> String {
+        guard quarters != 0 else { return "0" }
+        let whole = abs(quarters) / 4
+        let fraction = ["", "¼", "½", "¾"][abs(quarters) % 4]
+        return (quarters > 0 ? "+" : "-") + (whole == 0 ? "" : "\(whole)") + fraction
+    }
+
+    /// Feeds the finger's translation from where it landed. Returns the steps
+    /// this movement crossed, in the order to send them.
+    mutating func move(to translation: CGSize) -> [Step] {
+        radius = hypot(translation.width, translation.height)
+        let wasFine = isFine
+        if allowsFine {
+            if radius >= Self.fineRadius {
+                isFine = true
+            } else if radius < Self.fineRadius - Self.fineOverlap {
+                isFine = false
+            }
         }
 
-        let turned = bendFacing(toward: point, moved: moved)
-        // Per unit of travel along the track, so going back round a circle
-        // bends the same way as going forward.
-        let bend = along < 0 ? -turned : turned
-        curvature += (bend / moved - curvature) * min(1, moved / Self.curvatureSettling)
+        guard radius >= Self.deadZone else {
+            // Coming back out, it picks up from wherever it emerges rather
+            // than counting the jump across the middle as a turn.
+            angle = nil
+            return []
+        }
+        let now = atan2(translation.height, translation.width)
+        if let angle {
+            var change = now - angle
+            if change > .pi { change -= 2 * .pi }
+            if change <= -.pi { change += 2 * .pi }
+            turned += change
+        }
+        angle = now
 
-        var delta = 0
-        // The tolerance absorbs rounding in the running sum, which would
-        // otherwise make an exact 14pt pull fall a hair short of its step.
-        while travel - steppedTravel >= pointsPerStep - 1e-6 {
-            steppedTravel += pointsPerStep
-            delta += 1
+        var target = turned / Self.quarterAngle - bias
+        if isFine, !wasFine {
+            bias += target - CGFloat(quarters)
+            target = CGFloat(quarters)
         }
-        while travel - steppedTravel <= -pointsPerStep + 1e-6 {
-            steppedTravel -= pointsPerStep
-            delta -= 1
-        }
-        steps += delta
-        return delta
+        return settle(toward: target)
     }
 
     mutating func reset() {
-        self = PullStepper(axis: axis, pointsPerStep: pointsPerStep)
+        self = PullStepper(allowsFine: allowsFine)
     }
 
-    /// Turns the facing to the recent chord when the chord runs along it,
-    /// either way. Returns the angle turned, positive clockwise on screen.
-    private mutating func bendFacing(toward point: CGPoint, moved: CGFloat) -> CGFloat {
-        let tail = trail[0]
-        guard distance - tail.distance >= Self.chordLength else { return 0 }
-        let cx = point.x - tail.point.x, cy = point.y - tail.point.y
-        let chord = hypot(cx, cy)
-        // Short against the path it spans: the finger turned round inside it.
-        guard chord >= Self.chordLength / 2 else { return 0 }
+    /// Moves the value toward the finger, a quarter at a time far out and a
+    /// whole step at a time near the key, each only once the finger is a full
+    /// step's worth past it. Near the key the value always lands on a whole:
+    /// one left between wholes by a fine turn is made up with quarters.
+    private mutating func settle(toward target: CGFloat) -> [Step] {
+        // Absorbs rounding, which would otherwise leave an exact quarter turn
+        // a hair short of its eighth step.
+        let slack: CGFloat = 1e-6
+        var steps: [Step] = []
+        while true {
+            if isFine {
+                if target - CGFloat(quarters) >= 1 - slack {
+                    quarters += 1
+                    steps.append(Step(direction: 1, isQuarter: true))
+                } else if target - CGFloat(quarters) <= -1 + slack {
+                    quarters -= 1
+                    steps.append(Step(direction: -1, isQuarter: true))
+                } else {
+                    return steps
+                }
+            } else {
+                let below = Self.floorToWhole(quarters)
+                let above = below == quarters ? quarters + 4 : below + 4
+                let beneath = below == quarters ? quarters - 4 : below
+                if target >= CGFloat(above) - slack {
+                    steps += Self.steps(from: quarters, to: above)
+                    quarters = above
+                } else if target <= CGFloat(beneath) + slack {
+                    steps += Self.steps(from: quarters, to: beneath)
+                    quarters = beneath
+                } else {
+                    return steps
+                }
+            }
+        }
+    }
 
-        let direction = CGVector(dx: cx / chord, dy: cy / chord)
-        var dot = direction.dx * facing.dx + direction.dy * facing.dy
-        // Heading back along the track bends it just the same.
-        let sign: CGFloat = dot < 0 ? -1 : 1
-        dot *= sign
-        guard dot >= cos(Self.followAngle) else { return 0 }
+    /// A whole step if the gap is one, otherwise the quarters that close it.
+    private static func steps(from: Int, to: Int) -> [Step] {
+        let direction = to > from ? 1 : -1
+        if abs(to - from) == 4 {
+            return [Step(direction: direction, isQuarter: false)]
+        }
+        return Array(repeating: Step(direction: direction, isQuarter: true), count: abs(to - from))
+    }
 
-        let limit = moved / Self.tightestRadius
-        let turned = max(-limit, min(limit, atan2((facing.dx * direction.dy - facing.dy * direction.dx) * sign, dot)))
-        facing = CGVector(dx: facing.dx * cos(turned) - facing.dy * sin(turned),
-                          dy: facing.dx * sin(turned) + facing.dy * cos(turned))
-        return turned
+    /// The whole step at or below a value in quarters.
+    private static func floorToWhole(_ quarters: Int) -> Int {
+        let remainder = ((quarters % 4) + 4) % 4
+        return quarters - remainder
     }
 }

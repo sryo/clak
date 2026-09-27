@@ -2,21 +2,23 @@ import CoreGraphics
 import XCTest
 @testable import ClakRemote
 
-/// Replays drag paths through the stepper. Translations are in points from
-/// where the finger landed, in screen coordinates (y grows downward).
+/// Replays drag paths through the dial. Translations are in points from where
+/// the finger landed, which is the dial's centre, in screen coordinates (y
+/// grows downward, so an angle that increases is clockwise as seen).
 final class PullStepperTests: XCTestCase {
+    typealias Step = PullStepper.Step
+
     private struct Drag {
         var stepper: PullStepper
         var position = CGPoint.zero
-        /// Every step emitted, in order, as the key would call onStep.
-        var emitted: [Int] = []
+        /// Every step emitted, in order, as the key would send them.
+        var emitted: [Step] = []
 
-        init(axis: PullAxis) { stepper = PullStepper(axis: axis) }
+        init(allowsFine: Bool = true) { stepper = PullStepper(allowsFine: allowsFine) }
 
         mutating func to(_ point: CGPoint) {
             position = point
-            let delta = stepper.move(to: CGSize(width: point.x, height: point.y))
-            emitted += Array(repeating: delta > 0 ? 1 : -1, count: abs(delta))
+            emitted += stepper.move(to: CGSize(width: point.x, height: point.y))
         }
 
         /// Straight line to `point` in 2pt samples, the way touches arrive.
@@ -30,169 +32,243 @@ final class PullStepperTests: XCTestCase {
             }
         }
 
-        /// Sweeps `degrees` of arc of `radius`, starting from the current
-        /// position with the finger heading `startHeading` (radians, screen
-        /// coordinates). Positive degrees turn clockwise on screen.
-        mutating func arc(radius: CGFloat, degrees: CGFloat, startHeading: CGFloat) {
-            let turn: CGFloat = degrees >= 0 ? 1 : -1
-            // The centre sits a quarter turn from the heading, on the side the
-            // path bends toward.
-            let toCentre = startHeading + turn * .pi / 2
-            let centre = CGPoint(x: position.x + radius * cos(toCentre),
-                                 y: position.y + radius * sin(toCentre))
-            let startAngle = toCentre + .pi
+        /// Goes round the centre from the finger's current angle, keeping its
+        /// distance. Positive degrees are clockwise on screen.
+        mutating func turn(_ degrees: CGFloat) {
+            let radius = hypot(position.x, position.y)
+            let from = atan2(position.y, position.x)
             let sweep = degrees * .pi / 180
             let count = max(1, Int((abs(sweep) * radius / 2).rounded(.up)))
             for i in 1...count {
-                let a = startAngle + sweep * CGFloat(i) / CGFloat(count)
-                to(CGPoint(x: centre.x + radius * cos(a), y: centre.y + radius * sin(a)))
+                let a = from + sweep * CGFloat(i) / CGFloat(count)
+                to(CGPoint(x: radius * cos(a), y: radius * sin(a)))
             }
         }
 
-        var net: Int { emitted.reduce(0, +) }
+        /// Straight out or in to `radius`, keeping the finger's angle.
+        mutating func reach(_ radius: CGFloat) {
+            let a = atan2(position.y, position.x)
+            line(to: CGPoint(x: radius * cos(a), y: radius * sin(a)))
+        }
+
+        var quarters: Int { stepper.quarters }
+        var sentQuarters: Int { emitted.reduce(0) { $0 + $1.direction * ($1.isQuarter ? 1 : 4) } }
     }
 
-    private let up = -CGFloat.pi / 2
-    private let right: CGFloat = 0
+    private let up = Step(direction: 1, isQuarter: false)
+    private let down = Step(direction: -1, isQuarter: false)
+    private let quarterUp = Step(direction: 1, isQuarter: true)
+    private let quarterDown = Step(direction: -1, isQuarter: true)
 
-    private func steps(forArc degrees: CGFloat, radius: CGFloat) -> Int {
-        Int(abs(degrees) * .pi / 180 * radius / ControlMetrics.pointsPerStep)
+    /// Degrees of turn for a number of quarter steps.
+    private func degrees(quarters: CGFloat) -> CGFloat {
+        quarters * PullStepper.quarterAngle * 180 / .pi
     }
 
-    // MARK: - A straight pull, as the key has always behaved
+    // MARK: - Pulling out only sizes the dial
 
-    func testPullingUpStepsOncePerFourteenPoints() {
-        var drag = Drag(axis: .vertical)
-        drag.line(to: CGPoint(x: 0, y: -13))
-        XCTAssertEqual(drag.net, 0)
-        drag.line(to: CGPoint(x: 0, y: -42))
-        XCTAssertEqual(drag.emitted, [1, 1, 1])
+    func testPullingStraightOutChangesNothing() {
+        for end in [CGPoint(x: 0, y: -250), CGPoint(x: 180, y: 0), CGPoint(x: -120, y: -120)] {
+            var drag = Drag()
+            drag.line(to: end)
+            XCTAssertEqual(drag.emitted, [], "to \(end)")
+            XCTAssertEqual(drag.stepper.radius, hypot(end.x, end.y), accuracy: 0.001)
+        }
     }
 
-    func testComingBackStepsDownFromWhereItGotTo() {
-        var drag = Drag(axis: .vertical)
-        drag.line(to: CGPoint(x: 0, y: -42))
-        drag.line(to: CGPoint(x: 0, y: -28))
-        XCTAssertEqual(drag.emitted, [1, 1, 1, -1])
-        XCTAssertEqual(drag.stepper.steps, 2)
+    /// Close to the centre an angle swings wildly for a tiny movement, so
+    /// there it counts for nothing.
+    func testTheMiddleIsDead() {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: PullStepper.deadZone - 4, y: 0))
+        drag.turn(720)
+        XCTAssertEqual(drag.emitted, [])
+        XCTAssertNil(drag.stepper.angle)
     }
 
-    func testHorizontalStepsRightAsPositive() {
-        var drag = Drag(axis: .horizontal)
-        drag.line(to: CGPoint(x: 28, y: 0))
-        XCTAssertEqual(drag.net, 2)
-        drag.line(to: CGPoint(x: -28, y: 0))
-        XCTAssertEqual(drag.net, -2)
+    // MARK: - Turning near the key
+
+    /// Out to the left, then over the top of the key to the right: the whole
+    /// of the Mac's volume or brightness range.
+    func testAHalfTurnOverTheTopIsSixteenSteps() {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: -80, y: 0))
+        drag.turn(180)
+        XCTAssertEqual(drag.emitted, Array(repeating: up, count: 16))
+        XCTAssertEqual(drag.quarters, 64)
     }
 
-    func testMovementAcrossTheAxisIsIgnored() {
-        var drag = Drag(axis: .vertical)
-        drag.line(to: CGPoint(x: 120, y: 0))
+    func testCounterclockwiseLowers() {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: 80, y: 0))
+        drag.turn(-180)
+        XCTAssertEqual(drag.emitted, Array(repeating: down, count: 16))
+    }
+
+    func testTurningBackWindsBack() {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: -80, y: 0))
+        drag.turn(180)
+        drag.turn(-90)
+        XCTAssertEqual(drag.quarters, 32)
+        XCTAssertEqual(drag.emitted.suffix(8), Array(repeating: down, count: 8))
+    }
+
+    /// Past a full turn it keeps counting: the dial has no end stops.
+    func testLapsKeepCounting() {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: 0, y: -70))
+        drag.turn(720)
+        XCTAssertEqual(drag.quarters, 64 * 4)
+    }
+
+    /// Straight across the key passes through the middle, and must not read
+    /// as the half turn that its two ends are apart.
+    func testCrossingThroughTheMiddleIsNotATurn() {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: -80, y: 0))
+        drag.line(to: CGPoint(x: 80, y: 0))
         XCTAssertEqual(drag.emitted, [])
     }
 
-    /// A hand trembles at around 10 Hz against touches arriving at 120, so a
-    /// shaky pull sways every ten samples or so.
-    func testATremblingPullStillCountsItsLength() {
-        var drag = Drag(axis: .vertical)
-        for i in 1...150 {
-            let sway = 1.5 * sin(2 * .pi * CGFloat(i) / 10)
-            drag.to(CGPoint(x: sway, y: -CGFloat(i) * 2))
-        }
-        XCTAssertEqual(drag.net, 21, accuracy: 2)
-        XCTAssertFalse(drag.emitted.contains(-1))
+    /// Swiping sideways off the key is a pull out, not a turn: it once
+    /// raised the volume by twelve.
+    func testASidewaysSwipeThatDriftsDoesNothing() {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: -36, y: -4))
+        drag.line(to: CGPoint(x: -52, y: -7))
+        drag.line(to: CGPoint(x: -200, y: -7))
+        XCTAssertEqual(drag.emitted, [])
     }
 
-    /// Hunting for a level: out, back, out, back. Going back along the path
-    /// is always down, however many times it turns around.
-    func testScrubbingBackAndForthEndsWhereTheFingerIs() {
-        var drag = Drag(axis: .horizontal)
-        for _ in 0..<6 {
-            drag.line(to: CGPoint(x: 60, y: 0))
-            drag.line(to: CGPoint(x: -60, y: 0))
-        }
-        XCTAssertEqual(drag.net, -4, accuracy: 1)
+    // MARK: - Far out, the dial subdivides
+
+    /// The same turn is the same amount at any distance; far out it just
+    /// lands on every quarter on the way.
+    func testFarOutTheSameTurnLandsOnEveryQuarter() {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: -160, y: 0))
+        drag.turn(180)
+        XCTAssertTrue(drag.stepper.isFine)
+        XCTAssertEqual(drag.quarters, 64)
+        XCTAssertEqual(drag.emitted, Array(repeating: quarterUp, count: 64))
     }
 
-    // MARK: - A line is a circle with a very big radius
-
-    /// A thumb pivots on its joint, so a long pull is an arc; all of it counts.
-    func testAThumbArcCountsItsWholeLength() {
-        var drag = Drag(axis: .vertical)
-        drag.arc(radius: 160, degrees: 100, startHeading: up)
-        XCTAssertEqual(drag.net, steps(forArc: 100, radius: 160), accuracy: 1)
-        XCTAssertFalse(drag.emitted.contains(-1))
-    }
-
-    /// Curling a pull round, either way and at any size, keeps the value
-    /// going the way it was going. Nothing switches, so nothing wobbles.
-    func testCurlingIntoACircleNeverStepsBack() {
-        for radius: CGFloat in [20, 60, 150] {
-            for turn: CGFloat in [1, -1] {
-                var drag = Drag(axis: .vertical)
-                drag.arc(radius: radius, degrees: 540 * turn, startHeading: up)
-                let label = "r=\(radius) turn=\(turn)"
-                XCTAssertFalse(drag.emitted.contains(-1), label)
-                XCTAssertEqual(drag.net, steps(forArc: 540, radius: radius), accuracy: 2, label)
-            }
+    func testTheValueFollowsTheAngleAtAnyDistance() {
+        for radius: CGFloat in [40, 90, 220] {
+            var drag = Drag()
+            drag.line(to: CGPoint(x: 0, y: -radius))
+            drag.turn(90)
+            XCTAssertEqual(drag.quarters, 32, "r=\(radius)")
+            XCTAssertEqual(drag.sentQuarters, 32, "r=\(radius)")
         }
     }
 
-    func testTurningAroundOnACircleWindsBack() {
-        var drag = Drag(axis: .horizontal)
-        drag.arc(radius: 50, degrees: 720, startHeading: right)
-        let atTop = drag.net
-        // Turning around on a circle is a cusp, then the other way round.
-        drag.arc(radius: 50, degrees: -360, startHeading: right + .pi)
-        XCTAssertEqual(drag.net - atTop, -steps(forArc: 360, radius: 50), accuracy: 2)
+    /// A finger hovering at the edge of the fine zone must not flicker in
+    /// and out of it.
+    func testTheFineZoneHoldsNearItsEdge() {
+        let edge = PullStepper.fineRadius
+        var drag = Drag()
+        drag.line(to: CGPoint(x: 0, y: -(edge - 5)))
+        XCTAssertFalse(drag.stepper.isFine, "not yet in")
+        drag.line(to: CGPoint(x: 0, y: -(edge + 1)))
+        XCTAssertTrue(drag.stepper.isFine)
+        drag.line(to: CGPoint(x: 0, y: -(edge - 5)))
+        XCTAssertTrue(drag.stepper.isFine, "held through the overlap")
+        drag.line(to: CGPoint(x: 0, y: -(edge - 15)))
+        XCTAssertFalse(drag.stepper.isFine)
     }
 
-    /// A hand drifts while it circles. There is no centre to lose, so the
-    /// count only follows the finger.
-    func testADriftingCircleKeepsCounting() {
-        var drag = Drag(axis: .vertical)
-        drag.arc(radius: 50, degrees: 360, startHeading: up)
+    /// Near the key the value trails the finger by up to three quarters,
+    /// waiting for the next whole step. Moving out must not pay those
+    /// quarters out at once: pulling out never changes the value.
+    func testMovingOutPartWayToAStepChangesNothing() {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: -80, y: 0))
+        drag.turn(degrees(quarters: 7))
+        XCTAssertEqual(drag.quarters, 4)
         let before = drag.emitted.count
-        for lap in 0..<4 {
-            drag.arc(radius: 50, degrees: 180, startHeading: up)
-            drag.line(to: CGPoint(x: drag.position.x + 20, y: drag.position.y + 5))
-            drag.arc(radius: 50 + CGFloat(lap) * 10, degrees: 180, startHeading: up + .pi)
+        drag.reach(200)
+        XCTAssertTrue(drag.stepper.isFine)
+        XCTAssertEqual(drag.emitted.count, before)
+        drag.turn(degrees(quarters: 2))
+        XCTAssertEqual(Array(drag.emitted[before...]), [quarterUp, quarterUp])
+    }
+
+    /// Coming back in at +3¼, the dial is back on whole steps and the
+    /// quarter is not carried: the next tick up lands on +4, sent as the
+    /// three quarters that close the gap.
+    func testComingBackInLandsTheNextStepOnAWhole() {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: -160, y: 0))
+        drag.turn(degrees(quarters: 13.5))
+        XCTAssertEqual(drag.quarters, 13)
+        drag.reach(80)
+        let before = drag.emitted.count
+        drag.turn(degrees(quarters: 3))
+        XCTAssertEqual(drag.quarters, 16)
+        XCTAssertEqual(Array(drag.emitted[before...]), [quarterUp, quarterUp, quarterUp])
+        drag.turn(degrees(quarters: 4))
+        XCTAssertEqual(drag.quarters, 20)
+        XCTAssertEqual(drag.emitted.last, up)
+    }
+
+    func testComingBackInAndDownDropsTheQuarter() {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: -160, y: 0))
+        drag.turn(degrees(quarters: 13.5))
+        drag.reach(80)
+        let before = drag.emitted.count
+        drag.turn(-degrees(quarters: 2))
+        XCTAssertEqual(drag.quarters, 12)
+        XCTAssertEqual(Array(drag.emitted[before...]), [quarterDown])
+    }
+
+    /// Seeking has no quarter step, so the scrubber never subdivides.
+    func testAKeyWithoutFineStepsStaysWhole() {
+        var drag = Drag(allowsFine: false)
+        drag.line(to: CGPoint(x: -200, y: 0))
+        drag.turn(90)
+        XCTAssertFalse(drag.stepper.isFine)
+        XCTAssertEqual(drag.emitted, Array(repeating: up, count: 8))
+    }
+
+    func testTheReadoutCountsWholeStepsAndQuarters() {
+        let cases: [(Int, String)] = [
+            (0, "0"), (4, "+1"), (13, "+3¼"), (2, "+½"), (3, "+¾"),
+            (-1, "-¼"), (-10, "-2½"), (-64, "-16"),
+        ]
+        for (quarters, text) in cases {
+            XCTAssertEqual(PullStepper.readout(quarters: quarters), text, "\(quarters)")
         }
-        XCTAssertFalse(drag.emitted[before...].contains(-1))
     }
 
-    // MARK: - Curvature, for the track to take the gesture's shape
+    // MARK: - What the ring shows
 
-    func testCurvatureIsOneOverTheRadiusWhileCircling() {
-        for radius: CGFloat in [30, 80] {
-            var drag = Drag(axis: .vertical)
-            drag.arc(radius: radius, degrees: 360, startHeading: up)
-            XCTAssertEqual(drag.stepper.curvature, 1 / radius, accuracy: 0.3 / radius, "r=\(radius)")
-        }
-    }
-
-    func testCurvatureIsSignedByWhichWayItBends() {
-        var drag = Drag(axis: .vertical)
-        drag.arc(radius: 50, degrees: -360, startHeading: up)
-        XCTAssertLessThan(drag.stepper.curvature, 0)
-    }
-
-    func testCurvatureStraightensOutOnALine() {
-        var drag = Drag(axis: .vertical)
-        drag.arc(radius: 40, degrees: 360, startHeading: up)
-        drag.line(to: CGPoint(x: drag.position.x + 80, y: drag.position.y))
-        XCTAssertEqual(drag.stepper.curvature, 0, accuracy: 0.005)
+    /// The start of the scale is where the finger's angle was when it began,
+    /// carried round by the net turn: it stays put on screen while the
+    /// finger goes round.
+    func testTheStartStaysWhereTheTurnBegan() throws {
+        var drag = Drag()
+        drag.line(to: CGPoint(x: -80, y: 0))
+        drag.turn(135)
+        let start = try XCTUnwrap(drag.stepper.startAngle)
+        XCTAssertEqual(cos(start), -1, accuracy: 1e-6)
+        XCTAssertEqual(drag.stepper.turned, 135 * .pi / 180, accuracy: 1e-6)
     }
 
     func testResetForgetsEverything() {
-        var drag = Drag(axis: .vertical)
-        drag.arc(radius: 50, degrees: 720, startHeading: up)
+        var drag = Drag()
+        drag.line(to: CGPoint(x: -80, y: 0))
+        drag.turn(270)
         drag.stepper.reset()
-        XCTAssertEqual(drag.stepper.steps, 0)
-        XCTAssertEqual(drag.stepper.curvature, 0)
+        XCTAssertEqual(drag.quarters, 0)
+        XCTAssertEqual(drag.stepper.turned, 0)
+        XCTAssertNil(drag.stepper.angle)
         drag.position = .zero
         drag.emitted = []
-        drag.line(to: CGPoint(x: 0, y: -28))
-        XCTAssertEqual(drag.net, 2)
+        drag.line(to: CGPoint(x: 0, y: -80))
+        drag.turn(45)
+        XCTAssertEqual(drag.emitted, Array(repeating: up, count: 4))
     }
 }

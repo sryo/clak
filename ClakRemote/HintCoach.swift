@@ -3,20 +3,20 @@ import Observation
 
 /// The gestures that carry real function but leave no mark on screen.
 enum Affordance: String {
-    /// Keys that hold a value you can pull out of them.
+    /// Keys that hold a value you can turn.
     case pullKey
     case layerSwipe
     case panelExpand
 
     /// Taught in this order: whichever is still unknown and costs the most to
-    /// miss goes first. A pull key wears a chevron, but nothing says what the
-    /// chevron affords, and behind it sit brightness, volume and scrubbing;
-    /// expansion only hides extras.
+    /// miss goes first. A turning key wears a small arrow, but nothing says
+    /// what the arrow affords, and behind it sit brightness, volume and
+    /// scrubbing; expansion only hides extras.
     static let teachingOrder: [Affordance] = [.pullKey, .layerSwipe, .panelExpand]
 
     var words: String {
         switch self {
-        case .pullKey: "Pull a key to adjust"
+        case .pullKey: "Turn around a key to adjust"
         case .layerSwipe: "Swipe for keys"
         case .panelExpand: "Pull up for more"
         }
@@ -24,7 +24,7 @@ enum Affordance: String {
 
     var glyph: String {
         switch self {
-        case .pullKey: "arrow.up.and.down"
+        case .pullKey: "arrow.clockwise"
         case .layerSwipe: "arrow.left.arrow.right"
         case .panelExpand: "chevron.up"
         }

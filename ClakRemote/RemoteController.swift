@@ -390,15 +390,23 @@ final class RemoteController {
         drainSendQueue()
     }
 
-    func tapConsumer(_ usage: UInt16) {
+    /// A media key tap. `fine` holds Shift+Option around it, which macOS
+    /// reads as a quarter step for its volume and brightness keys.
+    func tapConsumer(_ usage: UInt16, fine: Bool = false) {
         noteInteraction()
         let pendingTapEntries = sendQueue.reduce(0) { count, send in
             if case .consumer = send { return count + 1 }
             return count
         }
         guard pendingTapEntries < maxQueuedConsumerTaps * 2 else { return }
+        if fine {
+            sendQueue.append(.keyboard(modifiers: HIDModifier.shift | HIDModifier.option, keyCode: nil))
+        }
         sendQueue.append(.consumer(usage))
         sendQueue.append(.consumer(0))
+        if fine {
+            sendQueue.append(.keyboard(modifiers: 0, keyCode: nil))
+        }
         drainSendQueue()
     }
 
