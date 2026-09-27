@@ -71,7 +71,6 @@ struct ControlBar: View {
         .padding(.horizontal, 8)
         .glassPanel(cornerRadius: ControlMetrics.barRadius)
         .glassGroup()
-        .animation(panelSpring, value: isExpanded)
         .animation(panelSpring, value: isTyping)
         .onChange(of: coach.current) { _, hint in
             guard let hint, hint.style == .peek, !reduceMotion else { return }
@@ -164,13 +163,19 @@ struct ControlBar: View {
             .accessibilityLabel(Text("Control panel"))
             .accessibilityValue(Text(layerName))
             .accessibilityHint(Text("Actions available to change layer or show more controls"))
-            .accessibilityAction(named: Text(expandActionName)) { isExpanded.toggle() }
+            .accessibilityAction(named: Text(expandActionName)) { setExpanded(!isExpanded) }
             .accessibilityAction(named: Text(switchActionName)) { toggleLayer() }
     }
 
     private var layerName: String { layer == .media ? "Media layer" : "Keys layer" }
     private var expandActionName: String { isExpanded ? "Collapse" : "Expand" }
     private var switchActionName: String { layer == .media ? "Switch to keys" : "Switch to media" }
+
+    /// Animated at the source rather than on the bar, so the surface above
+    /// gives up or takes back its height in the same spring.
+    private func setExpanded(_ expanded: Bool) {
+        withAnimation(panelSpring) { isExpanded = expanded }
+    }
 
     private func toggleLayer() {
         layer = layer == .media ? .keys : .media
@@ -273,7 +278,7 @@ struct ControlBar: View {
                     }
                 } else {
                     guard abs(value.translation.height) > 20 else { return }
-                    isExpanded = value.translation.height < 0
+                    setExpanded(value.translation.height < 0)
                     if isExpanded { coach.markDiscovered(.panelExpand) }
                     Haptics.medium.impactOccurred()
                 }

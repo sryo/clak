@@ -136,8 +136,6 @@ struct ContentView: View {
     /// instead — empty means ready.
     private var surface: some View {
         ZStack {
-            surfaceShape.fill(Color(uiColor: .secondarySystemBackground))
-
             if showsTrackpad {
                 TrackpadView(controller: controller)
                     .transition(.opacity)
@@ -178,6 +176,7 @@ struct ContentView: View {
         .coordinateSpace(.named(Self.surfaceSpace))
         .frame(maxHeight: .infinity)
         .clipShape(surfaceShape)
+        .glassPanel(in: surfaceShape)
     }
 
     private var isErrorStatus: Bool {
