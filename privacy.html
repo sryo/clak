@@ -3,115 +3,300 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clak Privacy</title>
+  <title>Privacy - Clak</title>
   <meta name="description" content="Clak and Clak Remote collect nothing. Nothing leaves your devices except the keystrokes you send.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='4' width='56' height='56' rx='14' fill='%230a84ff'/%3E%3Crect x='14' y='12' width='36' height='34' rx='8' fill='%23fff' fill-opacity='.22'/%3E%3Cpath d='M39 22.5a10 10 0 1 0 0 11' fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="canonical" href="https://sryo.github.io/clak/privacy.html">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://sryo.github.io/clak/privacy.html">
+  <meta property="og:title" content="Clak Privacy">
+  <meta property="og:description" content="Clak and Clak Remote collect nothing. Nothing leaves your devices except the keystrokes you send.">
+  <meta name="twitter:card" content="summary">
   <style>
+    /* ---------- Tokens (shared with privacy.html) ---------- */
     :root {
-      --bg-primary: #ffffff;
-      --bg-secondary: #f5f5f5;
-      --text-primary: #222;
-      --text-secondary: #666;
-      --accent: #0a84ff;
-      --border: #e0e0e0;
+      /* 1.25 type scale on a 16px base */
+      --fs--1: 0.8rem;      /* 12.8 */
+      --fs-0: 1rem;         /* 16   */
+      --fs-1: 1.25rem;      /* 20   */
+      --fs-2: 1.5625rem;    /* 25   */
+      --fs-3: 1.953rem;     /* 31.25 */
+      --fs-4: 2.441rem;     /* 39   */
+      --fs-5: 3.052rem;     /* 48.8 */
+      --fs-6: 3.815rem;     /* 61   */
+
+      /* 8px spacing grid */
+      --s-1: 8px;
+      --s-2: 16px;
+      --s-3: 24px;
+      --s-4: 32px;
+      --s-5: 40px;
+      --s-6: 48px;
+      --s-8: 64px;
+      --s-10: 80px;
+      --s-12: 96px;
+
+      --measure: 720px;
+      --wide: 880px;
+      --gutter: var(--s-3);
+      --radius-s: 8px;
+      --radius-m: 16px;
+      --radius-l: 24px;
+
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+      --bg: #ffffff;
+      --bg-2: #f5f5f7;
+      --text: #1d1d1f;
+      --text-2: #6e6e73;
+      --border: #d2d2d7;
+      --hairline: #e5e5ea;
+      --accent: #0a84ff;       /* system blue, for fills and marks */
+      --link: #0066cc;         /* system blue, darkened for AA text on light */
+      --button: #0071e3;
+      --button-hover: #0077ed;
+      --on-button: #ffffff;
+      --header-bg: rgba(255, 255, 255, 0.78);
+      --focus: #0a84ff;
     }
 
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg-primary: #1e1e1e;
-        --bg-secondary: #2a2a2a;
-        --text-primary: #f0f0f0;
-        --text-secondary: #a0a0a0;
-        --border: #3a3a3a;
+        --bg: #111113;
+        --bg-2: #1c1c1e;
+        --text: #f5f5f7;
+        --text-2: #a1a1a6;
+        --border: #3a3a3c;
+        --hairline: #2c2c2e;
+        --link: #3ea0ff;
+        --header-bg: rgba(17, 17, 19, 0.78);
+        --focus: #3ea0ff;
       }
     }
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html { -webkit-text-size-adjust: 100%; scroll-padding-top: var(--s-10); }
 
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      line-height: 1.6;
+      font-family: var(--font);
+      font-size: var(--fs-0);
+      line-height: 1.5;
+      background: var(--bg);
+      color: var(--text);
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      overflow-x: clip;
     }
 
-    .container { max-width: 720px; margin: 0 auto; padding: 0 1.5rem; }
+    h1, h2, .hero__promise, .hero__sub, .lede { text-wrap: balance; }
+    p { text-wrap: pretty; }
 
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; text-underline-offset: 0.15em; }
 
-    .back { display: inline-block; margin-top: 2rem; font-size: 0.9rem; font-weight: 500; }
+    :focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
 
-    h1 {
-      margin-top: 72px;
-      font-size: 3rem;
-      font-weight: 900;
-      letter-spacing: -0.04em;
-      line-height: 1.1;
+    .skip {
+      position: absolute;
+      left: var(--s-2);
+      top: -100px;
+      z-index: 20;
+      padding: var(--s-1) var(--s-2);
+      background: var(--bg);
+      border-radius: var(--radius-s);
+    }
+    .skip:focus { top: var(--s-1); }
+
+    .container { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; padding: 0 var(--gutter); }
+    .container--wide { max-width: calc(var(--wide) + 2 * var(--gutter)); }
+
+    /* ---------- Header ---------- */
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--header-bg);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      border-bottom: 1px solid var(--hairline);
+    }
+    .site-header .container {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .wordmark {
+      font-family: var(--font-display);
+      font-size: var(--fs-1);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text);
+    }
+    .wordmark:hover { text-decoration: none; }
+    .nav { display: flex; gap: var(--s-3); font-size: 0.875rem; }
+    .nav a { color: var(--text-2); }
+    .nav a:hover { color: var(--text); text-decoration: none; }
+    .nav a[aria-current="page"] { color: var(--text); }
+
+    /* ---------- Footer ---------- */
+    .site-footer { margin-top: var(--s-12); padding: var(--s-4) 0 var(--s-6); }
+    .site-footer .container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--s-1) var(--s-3);
+      justify-content: space-between;
+      align-items: center;
+      padding-top: var(--s-3);
+      font-size: var(--fs--1);
+      color: var(--text-2);
+    }
+    .site-footer .container { position: relative; }
+    .site-footer .container::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: var(--gutter);
+      right: var(--gutter);
+      border-top: 1px solid var(--hairline);
+    }
+    .site-footer nav { display: flex; gap: var(--s-3); }
+    .site-footer a { color: var(--text-2); }
+    .site-footer a:hover { color: var(--text); }
+
+    /* ---------- Privacy ---------- */
+    .page-head, .points { max-width: var(--measure); }
+    .page-head { padding: var(--s-12) 0 var(--s-6); }
+    .page-head h1 {
+      font-family: var(--font-display);
+      font-size: var(--fs-5);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
     }
     .lede {
-      margin: 1rem 0 2.5rem;
-      font-size: 1.35rem;
+      margin-top: var(--s-2);
+      max-width: 30em;
+      font-family: var(--font-display);
+      font-size: var(--fs-2);
       font-weight: 500;
-      line-height: 1.5;
+      letter-spacing: -0.01em;
+      line-height: 1.3;
+      color: var(--text-2);
     }
+    .lede strong { color: var(--text); font-weight: 600; }
 
-    .points { list-style: none; display: grid; gap: 10px; }
-    .points li {
-      padding: 16px 18px;
-      background: var(--bg-secondary);
-      border-radius: 12px;
-      color: var(--text-secondary);
+    .points { border-top: 1px solid var(--hairline); }
+    .points > div {
+      display: grid;
+      grid-template-columns: 176px 1fr;
+      gap: var(--s-1) var(--s-4);
+      padding: var(--s-3) 0;
+      border-bottom: 1px solid var(--hairline);
     }
-    .points strong { color: var(--text-primary); font-weight: 700; }
+    .points dt { font-weight: 600; }
+    .points dd { color: var(--text-2); }
 
     .fine {
-      margin-top: 2rem;
-      font-size: 0.85rem;
-      color: var(--text-secondary);
+      margin-top: var(--s-6);
+      font-size: 0.875rem;
+      line-height: 1.6;
+      color: var(--text-2);
+      max-width: 40em;
     }
-    .fine p + p { margin-top: 0.5rem; }
+    .fine p + p { margin-top: var(--s-2); }
 
-    .footer { padding: 40px 0; text-align: center; }
-    .footer__bottom {
-      padding-top: 2rem;
-      border-top: 1px solid var(--border);
-      font-size: 0.9rem;
-      color: var(--text-secondary);
+    @media (max-width: 720px) {
+      :root { --gutter: var(--s-2); }
+      .page-head { padding: var(--s-8) 0 var(--s-4); }
+      .page-head h1 { font-size: var(--fs-4); }
+      .lede { font-size: var(--fs-1); }
+      .points > div { grid-template-columns: 1fr; gap: var(--s-1); padding: var(--s-2) 0; }
+      .nav { gap: var(--s-2); }
     }
 
-    @media (max-width: 640px) {
-      h1 { margin-top: 48px; font-size: 2.25rem; }
-      .lede { font-size: 1.1rem; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      html { scroll-behavior: auto; }
     }
   </style>
 </head>
 <body>
-  <main class="container">
-    <a class="back" href="./">← Clak</a>
+  <a class="skip" href="#main">Skip to content</a>
 
-    <h1>Privacy</h1>
-    <p class="lede">Clak collects nothing. Nothing leaves your devices except the keystrokes you send.</p>
+  <header class="site-header">
+    <div class="container container--wide">
+      <a class="wordmark" href="./">Clak</a>
+      <nav class="nav" aria-label="Site">
+        <a href="privacy.html" aria-current="page">Privacy</a>
+        <a href="https://github.com/sryo/clak">GitHub</a>
+      </nav>
+    </div>
+  </header>
 
-    <ul class="points">
-      <li><strong>No internet.</strong> Neither app ever connects to a network. There's no code for it.</li>
-      <li><strong>No accounts, analytics, ads or tracking.</strong></li>
-      <li><strong>Your typing goes only over Bluetooth</strong> to the device you paired, like a physical keyboard. It isn't recorded or stored.</li>
-      <li><strong>What stays on your device:</strong> your settings, like shortcuts and preferences. Deleting the app deletes them.</li>
-      <li><strong>Clipboard:</strong> the Mac app reads it only when you use Paste to Device.</li>
-      <li><strong>Permissions:</strong> Bluetooth, to act as a keyboard. On the Mac also Input Monitoring and Accessibility, to capture keys while you forward them. You can revoke them anytime in System Settings.</li>
-    </ul>
+  <main id="main" class="container container--wide">
+    <div class="page-head">
+      <h1>Privacy</h1>
+      <p class="lede"><strong>Clak collects nothing.</strong> Nothing leaves your devices except the keystrokes you send.</p>
+    </div>
+
+    <dl class="points">
+      <div>
+        <dt>No internet</dt>
+        <dd>Neither app ever connects to a network. There's no code for it.</dd>
+      </div>
+      <div>
+        <dt>No tracking</dt>
+        <dd>No accounts, analytics, ads or tracking.</dd>
+      </div>
+      <div>
+        <dt>Your typing</dt>
+        <dd>Goes only over Bluetooth to the device you paired, like a physical keyboard. It isn't recorded or stored.</dd>
+      </div>
+      <div>
+        <dt>On your device</dt>
+        <dd>Your settings, like shortcuts and preferences. Deleting the app deletes them.</dd>
+      </div>
+      <div>
+        <dt>Clipboard</dt>
+        <dd>The Mac app reads it only when you use Paste to Device.</dd>
+      </div>
+      <div>
+        <dt>Permissions</dt>
+        <dd>Bluetooth, to act as a keyboard. On the Mac also Input Monitoring and Accessibility, to capture keys while you forward them. You can revoke them anytime in System Settings.</dd>
+      </div>
+    </dl>
 
     <div class="fine">
       <p>This applies to Clak for macOS and Clak Remote for iOS, both made by sryo. Since no data is collected from anyone, none is collected from children. If this ever changes, this page changes first and the release notes will say so. The source is public, so you can check every line of this yourself.</p>
       <p>Questions: <a href="https://github.com/sryo/clak/issues">open an issue on GitHub</a>. Last updated September 27, 2026.</p>
     </div>
-
-    <footer class="footer">
-      <div class="footer__bottom">© 2026 sryo</div>
-    </footer>
   </main>
+
+  <footer class="site-footer">
+    <div class="container container--wide">
+      <span>© 2026 sryo</span>
+      <nav aria-label="Footer">
+        <a href="./">Home</a>
+        <a href="privacy.html" aria-current="page">Privacy</a>
+        <a href="https://github.com/sryo/clak">GitHub</a>
+      </nav>
+    </div>
+  </footer>
 </body>
 </html>
