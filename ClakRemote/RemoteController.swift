@@ -147,6 +147,17 @@ final class RemoteController {
 
     @ObservationIgnored
     private var republishTask: DispatchWorkItem?
+
+    /// Held down for as long as a turn is making quarter steps, rather than
+    /// tapped around each one. Tapped, they went down and up some seventy
+    /// times a second, and macOS and apps act on bare modifier taps: five
+    /// Shifts offer Sticky Keys, and a double-tapped Shift or Option is a
+    /// common app hotkey.
+    private static let fineModifiers = HIDModifier.shift | HIDModifier.option
+    @ObservationIgnored
+    private var fineModifiersHeld = false
+    @ObservationIgnored
+    private var fineRelease: DispatchWorkItem?
     /// Each unanswered round waits longer, so a phone left advertising near a
     /// Mac nobody is connecting to settles down instead of cycling forever.
     @ObservationIgnored
@@ -321,6 +332,7 @@ final class RemoteController {
     func sendGlobeShortcut(_ keyCode: UInt8) {
         noteInteraction()
         guard sendQueue.count + 4 <= maxQueuedSends else { return }
+        endFineRun()
         sendQueue.append(.consumer(ConsumerUsage.globe))
         sendQueue.append(.keyboard(modifiers: 0, keyCode: keyCode))
         sendQueue.append(.keyboard(modifiers: 0, keyCode: nil))
@@ -384,13 +396,15 @@ final class RemoteController {
     private func enqueueKeystroke(keyCode: UInt8, modifiers: UInt8) {
         noteInteraction()
         guard sendQueue.count + 2 <= maxQueuedSends else { return }
+        // Its release report lets go of any held quarter-step modifiers.
+        endFineRun()
         sendQueue.append(.keyboard(modifiers: modifiers, keyCode: keyCode))
         sendQueue.append(.keyboard(modifiers: 0, keyCode: nil))
         drainSendQueue()
     }
 
-    /// A media key tap. `fine` holds Shift+Option around it, which macOS
-    /// reads as a quarter step for its volume and brightness keys.
+    /// A media key tap. `fine` makes it a quarter step, which macOS reads
+    /// from its volume and brightness keys pressed with Shift+Option held.
     func tapConsumer(_ usage: UInt16, fine: Bool = false) {
         noteInteraction()
         let pendingTapEntries = sendQueue.reduce(0) { count, send in
@@ -399,14 +413,43 @@ final class RemoteController {
         }
         guard pendingTapEntries < maxQueuedConsumerTaps * 2 else { return }
         if fine {
-            sendQueue.append(.keyboard(modifiers: HIDModifier.shift | HIDModifier.option, keyCode: nil))
+            if !fineModifiersHeld {
+                sendQueue.append(.keyboard(modifiers: Self.fineModifiers, keyCode: nil))
+                fineModifiersHeld = true
+            }
+        } else {
+            releaseFineModifiers()
         }
         sendQueue.append(.consumer(usage))
         sendQueue.append(.consumer(0))
         if fine {
-            sendQueue.append(.keyboard(modifiers: 0, keyCode: nil))
+            // Held through pauses: a short hold and release reads as a tap,
+            // and two as a double tap. The turn ending releases them; this
+            // only catches a turn that never says it ended, so they can't
+            // linger into typing on the Mac.
+            fineRelease?.cancel()
+            let release = DispatchWorkItem { [weak self] in self?.releaseFineModifiers() }
+            fineRelease = release
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: release)
         }
         drainSendQueue()
+    }
+
+    /// Lets go of Shift+Option after a run of quarter steps. Called when a
+    /// turn ends; also safe to call when nothing is held.
+    func releaseFineModifiers() {
+        guard fineModifiersHeld else { return }
+        endFineRun()
+        sendQueue.append(.keyboard(modifiers: 0, keyCode: nil))
+        drainSendQueue()
+    }
+
+    /// Forgets a held run without sending its release, for callers whose
+    /// own next keyboard report releases it anyway.
+    private func endFineRun() {
+        fineRelease?.cancel()
+        fineRelease = nil
+        fineModifiersHeld = false
     }
 
     /// When something was last sent, in any form. Read by the hint coach to

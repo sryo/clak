@@ -27,14 +27,18 @@ struct PullKey<Label: View>: View {
     let onTap: (() -> Void)?
     /// Rotation applied by a hint, to show that this key turns.
     let twist: Angle
+    /// When a turn ends, however it ends.
+    let onEnd: (() -> Void)?
 
     init(
         allowsFine: Bool = true,
         twist: Angle = .zero,
         onStep: @escaping (Int, Bool) -> Void,
         onTap: (() -> Void)? = nil,
+        onEnd: (() -> Void)? = nil,
         @ViewBuilder label: () -> Label
     ) {
+        self.onEnd = onEnd
         self._stepper = State(initialValue: PullStepper(allowsFine: allowsFine))
         self.twist = twist
         self.onStep = onStep
@@ -102,6 +106,7 @@ struct PullKey<Label: View>: View {
         #endif
         stepper.reset()
         centre = nil
+        onEnd?()
     }
 
     private var turn: some Gesture {

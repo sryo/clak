@@ -330,6 +330,8 @@ struct ControlBar: View {
             PullKey(twist: .degrees(pullTwist)) { step, fine in
                 coach.markDiscovered(.pullKey)
                 controller.tapConsumer(step > 0 ? ConsumerUsage.brightnessUp : ConsumerUsage.brightnessDown, fine: fine)
+            } onEnd: {
+                controller.releaseFineModifiers()
             } label: {
                 Image(systemName: "sun.max").font(.system(size: 27))
             }
@@ -341,6 +343,8 @@ struct ControlBar: View {
                 controller.tapConsumer(step > 0 ? ConsumerUsage.volumeUp : ConsumerUsage.volumeDown, fine: fine)
             } onTap: {
                 controller.tapConsumer(ConsumerUsage.mute)
+            } onEnd: {
+                controller.releaseFineModifiers()
             } label: {
                 Image(systemName: "speaker.wave.2").font(.system(size: 27))
             }
