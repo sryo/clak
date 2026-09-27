@@ -79,7 +79,6 @@ struct TrackpadGestureRecognizer {
     /// Span ratio past which four fingers count as gathering or spreading.
     static let fourFingerPinchRatio: CGFloat = 0.7
     static let edgeWidth: CGFloat = 24
-    static let edgeSwipeDistance: CGFloat = 40
     /// How soon after a tap a press counts as the drag half of it. A
     /// one-finger tap's click is held back this long, as a Mac trackpad
     /// does with dragging on: sent at once, it would make the drag's press

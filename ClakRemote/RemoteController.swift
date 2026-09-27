@@ -8,7 +8,6 @@ enum HIDKey {
     static let escape: UInt8 = 0x29
     static let backspace: UInt8 = 0x2A
     static let tab: UInt8 = 0x2B
-    static let space: UInt8 = 0x2C
     static let rightArrow: UInt8 = 0x4F
     static let leftArrow: UInt8 = 0x50
     static let downArrow: UInt8 = 0x51
