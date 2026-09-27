@@ -24,9 +24,16 @@ struct ContentView: View {
     }
 
     @State private var idleClock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    /// Trails isConnected on the way up, so the ring can close into one before
-    /// the waiting screen gives way to the trackpad.
+    /// Trails isConnected on the way up, so the galaxy can collapse and burst
+    /// over the surface before the trackpad is swapped in under it.
     @State private var showsTrackpad = false
+    @State private var connectedAt: Date?
+    /// Where the waiting screen left room for the galaxy, in surface space.
+    @State private var galaxyOrigin: CGPoint?
+    /// Off once the burst has faded from the connected surface.
+    @State private var galaxyActive = true
+
+    private static let surfaceSpace = "surface"
 
     var body: some View {
         VStack(spacing: isCompact ? 8 : 10) {
@@ -77,14 +84,29 @@ struct ContentView: View {
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
         }
-        .onChange(of: isConnected, initial: true) { _, connected in
+        .onChange(of: isConnected, initial: true) { old, connected in
             guard connected else {
                 showsTrackpad = false
+                connectedAt = nil
+                galaxyActive = true
                 return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.2 : 0.9)) {
-                guard isConnected else { return }
-                withAnimation(.easeInOut(duration: 0.35)) { showsTrackpad = true }
+            // Already up at launch: nothing to play
+            guard old != connected else {
+                showsTrackpad = true
+                galaxyActive = false
+                return
+            }
+            let now = Date()
+            connectedAt = now
+            let covered = reduceMotion ? ConnectingGalaxyView.reducedMotionCrossfade : ConnectingGalaxyView.coveredAfter
+            DispatchQueue.main.asyncAfter(deadline: .now() + covered) {
+                guard connectedAt == now else { return }
+                withAnimation(.easeInOut(duration: reduceMotion ? 0.25 : 0.2)) { showsTrackpad = true }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + ConnectingGalaxyView.finishedAfter) {
+                guard connectedAt == now else { return }
+                galaxyActive = false
             }
         }
         .onChange(of: keyboardFocus.isVisible) { _, visible in
@@ -124,7 +146,7 @@ struct ContentView: View {
                 // otherwise it sits centred.
                 GeometryReader { geo in
                     ScrollView {
-                        WaitingView(controller: controller)
+                        WaitingView(controller: controller, galaxyOrigin: $galaxyOrigin, surfaceSpace: Self.surfaceSpace)
                             .frame(maxWidth: 420)
                             .padding(.horizontal, 26)
                             .padding(.vertical, 20)
@@ -144,9 +166,23 @@ struct ContentView: View {
                 .animation(.easeInOut(duration: 0.3), value: controller.status == .advertising)
                 .transition(.opacity)
             }
+
+            if galaxyActive, !isErrorStatus {
+                ConnectingGalaxyView(
+                    origin: galaxyOrigin,
+                    connectedAt: connectedAt,
+                    isDimmed: controller.bluetoothPermissionDenied
+                )
+            }
         }
+        .coordinateSpace(.named(Self.surfaceSpace))
         .frame(maxHeight: .infinity)
         .clipShape(surfaceShape)
+    }
+
+    private var isErrorStatus: Bool {
+        if case .error = controller.status { return true }
+        return false
     }
 
     private var surfaceShape: RoundedRectangle {
@@ -166,12 +202,13 @@ struct ContentView: View {
     }
 }
 
-/// Shown inside the surface while no Mac has picked us up: the ring, a
-/// headline and at most one line. The ring carries the rest: it creeps over
-/// each round and springs back when the app re-announces itself, and the
-/// system's own pairing dialog explains itself.
+/// Shown inside the surface while no Mac has picked us up: room for the
+/// galaxy, a headline and at most one line. The galaxy itself is drawn over
+/// the whole surface so its burst can cover it; this only says where it goes.
 private struct WaitingView: View {
     let controller: RemoteController
+    @Binding var galaxyOrigin: CGPoint?
+    let surfaceSpace: String
 
     /// A device that already knows us subscribes about a second into the
     /// first round, so a round that ran out means it isn't listening.
@@ -187,16 +224,12 @@ private struct WaitingView: View {
                     .font(.body)
                     .multilineTextAlignment(.center)
             } else {
-                ConnectingRingView(
-                    completedSteps: BringUp.stepsDone(
-                        status: controller.status,
-                        bluetoothOn: controller.bluetoothOn,
-                        servicesPublished: controller.servicesPublished
-                    ),
-                    retryWindow: controller.retryWindow,
-                    symbol: "dot.radiowaves.left.and.right",
-                    isDimmed: controller.bluetoothPermissionDenied
-                )
+                Color.clear
+                    .frame(width: ConnectingGalaxyView.footprint, height: ConnectingGalaxyView.footprint)
+                    .onGeometryChange(for: CGPoint.self) { proxy in
+                        let frame = proxy.frame(in: .named(surfaceSpace))
+                        return CGPoint(x: frame.midX, y: frame.midY)
+                    } action: { galaxyOrigin = $0 }
                 Text(headline)
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
