@@ -93,7 +93,7 @@ final class TrackpadUIView: UIView {
     private func configureAccessibility() {
         isAccessibilityElement = true
         accessibilityLabel = "Trackpad"
-        accessibilityHint = "Drag to move the pointer on your Mac. Tap to click, two fingers to scroll or pinch, three fingers to switch Spaces."
+        accessibilityHint = "Drag to move the pointer. Tap to click, two fingers to scroll or pinch."
         accessibilityTraits = [.allowsDirectInteraction]
         accessibilityCustomActions = [
             UIAccessibilityCustomAction(name: "Click") { [weak self] _ in

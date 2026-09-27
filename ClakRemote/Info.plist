@@ -23,7 +23,7 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Clak Remote uses Bluetooth to act as a keyboard and mouse for your Mac.</string>
+	<string>Clak Remote uses Bluetooth to act as a keyboard and mouse for your other devices.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-peripheral</string>

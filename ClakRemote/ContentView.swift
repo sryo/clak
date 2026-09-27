@@ -24,6 +24,9 @@ struct ContentView: View {
     }
 
     @State private var idleClock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    /// Trails isConnected on the way up, so the ring can close into one before
+    /// the waiting screen gives way to the trackpad.
+    @State private var showsTrackpad = false
 
     var body: some View {
         VStack(spacing: isCompact ? 8 : 10) {
@@ -52,8 +55,8 @@ struct ContentView: View {
             .frame(maxWidth: 520)
             .frame(maxWidth: .infinity)
             .disabled(!isConnected)
-            .opacity(isConnected ? 1 : 0.55)
-            .animation(.easeInOut(duration: 0.28), value: isConnected)
+            .opacity(showsTrackpad ? 1 : 0.55)
+            .animation(.easeInOut(duration: 0.35), value: showsTrackpad)
         }
         .padding(.horizontal, ControlMetrics.barInset)
         .padding(.top, 10)
@@ -73,6 +76,16 @@ struct ContentView: View {
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
+        }
+        .onChange(of: isConnected, initial: true) { _, connected in
+            guard connected else {
+                showsTrackpad = false
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.2 : 0.9)) {
+                guard isConnected else { return }
+                withAnimation(.easeInOut(duration: 0.35)) { showsTrackpad = true }
+            }
         }
         .onChange(of: keyboardFocus.isVisible) { _, visible in
             if !visible { controller.clearEcho() }
@@ -103,16 +116,33 @@ struct ContentView: View {
         ZStack {
             surfaceShape.fill(Color(uiColor: .secondarySystemBackground))
 
-            if isConnected {
+            if showsTrackpad {
                 TrackpadView(controller: controller)
+                    .transition(.opacity)
             } else {
-                ScrollView {
-                    WaitingView(controller: controller)
-                        .frame(maxWidth: 420)
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 26)
-                        .padding(.vertical, 20)
+                // Scrolls only when it must, in a short landscape surface;
+                // otherwise it sits centred.
+                GeometryReader { geo in
+                    ScrollView {
+                        WaitingView(controller: controller)
+                            .frame(maxWidth: 420)
+                            .padding(.horizontal, 26)
+                            .padding(.vertical, 20)
+                            .frame(maxWidth: .infinity, minHeight: geo.size.height)
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
                 }
+                .overlay(alignment: .bottom) {
+                    if controller.status == .advertising {
+                        Text("Keep this screen open while connecting")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.bottom, 18)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.3), value: controller.status == .advertising)
+                .transition(.opacity)
             }
         }
         .frame(maxHeight: .infinity)
@@ -136,26 +166,27 @@ struct ContentView: View {
     }
 }
 
-/// Shown inside the surface while no Mac has picked us up.
+/// Shown inside the surface while no Mac has picked us up: the ring, a
+/// headline and at most one line. The ring carries the rest: it creeps over
+/// each round and springs back when the app re-announces itself, and the
+/// system's own pairing dialog explains itself.
 private struct WaitingView: View {
     let controller: RemoteController
 
-    /// A Mac that already knows us subscribes about a second into the first
-    /// round, so a round that ran out means it isn't listening: from then on
-    /// the copy says what the app is doing about it.
+    /// A device that already knows us subscribes about a second into the
+    /// first round, so a round that ran out means it isn't listening.
     private var isRetrying: Bool { (controller.retryWindow?.attempt ?? 0) > 0 }
 
     var body: some View {
-        VStack(spacing: 14) {
-            switch controller.status {
-            case .error(let message):
+        VStack(spacing: 16) {
+            if case .error(let message) = controller.status {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 28))
                     .foregroundStyle(.orange)
                 Text(message)
                     .font(.body)
                     .multilineTextAlignment(.center)
-            default:
+            } else {
                 ConnectingRingView(
                     completedSteps: BringUp.stepsDone(
                         status: controller.status,
@@ -163,29 +194,23 @@ private struct WaitingView: View {
                         servicesPublished: controller.servicesPublished
                     ),
                     retryWindow: controller.retryWindow,
-                    symbol: "laptopcomputer"
+                    symbol: "dot.radiowaves.left.and.right",
+                    isDimmed: controller.bluetoothPermissionDenied
                 )
                 Text(headline)
                     .font(.title3.weight(.semibold))
+                    .multilineTextAlignment(.center)
                     .contentTransition(.opacity)
-                if isRetrying {
-                    Text("Clak Remote re-announces itself each time the ring closes, so a Mac that missed it looks again. If a pairing request appears here, confirm it.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text("On your Mac, open Settings ▸ Bluetooth and connect to Clak Remote, then confirm the request that appears here.")
+                // Always two lines tall, empty or not, so the ring above never
+                // shifts as the state changes; only the words fade.
+                Text(line ?? " ")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Keep this screen open — iOS hides Clak Remote from your Mac while the app is in the background.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
+                    .lineLimit(2, reservesSpace: true)
+                    .frame(maxWidth: 260)
+                    .opacity(line == nil ? 0 : 1)
+                    .contentTransition(.opacity)
             }
 
             if controller.bluetoothPermissionDenied {
@@ -198,13 +223,22 @@ private struct WaitingView: View {
                 .padding(.top, 6)
             }
         }
-        .animation(.easeInOut(duration: 0.28), value: isRetrying)
+        .animation(.easeInOut(duration: 0.3), value: headline)
+        .animation(.easeInOut(duration: 0.3), value: line)
     }
 
     private var headline: String {
+        if controller.bluetoothPermissionDenied { return "Bluetooth access is off" }
         switch controller.status {
-        case .advertising: isRetrying ? "Still waiting for your Mac" : "Waiting for your Mac"
-        default: "Starting up"
+        case .connected: return "Connected"
+        case .advertising: return isRetrying ? "Still waiting to connect" : "Waiting to connect"
+        default: return "Starting up"
         }
+    }
+
+    private var line: String? {
+        if controller.bluetoothPermissionDenied { return "Clak Remote needs Bluetooth to connect." }
+        if controller.status == .advertising { return "Connect to Clak Remote in the other device\u{2019}s Bluetooth settings." }
+        return nil
     }
 }
