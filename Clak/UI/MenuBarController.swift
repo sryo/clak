@@ -1,6 +1,6 @@
 import Cocoa
 
-final class MenuBarController {
+final class MenuBarController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
 
     var onShowMainWindow: (() -> Void)?
@@ -10,210 +10,122 @@ final class MenuBarController {
     var onReconnect: (() -> Void)?
     var onQuit: (() -> Void)?
 
-    private var currentIsConnected = false
-    private var currentDeviceName: String?
-    private var currentIsForwarding = true
-    private var currentIsGlobalForwarding = false
+    /// Read each time the menu opens, so it reflects the current state and
+    /// the current shortcut bindings. Falls back to the last pushed status.
+    var inputProvider: (() -> HUDInput)?
+
+    private var lastInput = HUDInput()
 
     // MARK: - Setup
 
     func setup() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.toolTip = "Clak"
 
-        if let button = item.button {
-            let image = NSImage(
-                systemSymbolName: "keyboard",
-                accessibilityDescription: "Clak"
-            )
-            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-            button.image = image?.withSymbolConfiguration(config)
-            button.toolTip = "Clak"
-        }
-
-        item.menu = buildMenu()
+        let menu = NSMenu()
+        menu.delegate = self
+        menu.autoenablesItems = false
+        item.menu = menu
         statusItem = item
 
-        updateButtonAppearance(isConnected: false)
+        rebuild(menu)
+        updateButtonAppearance()
     }
 
     // MARK: - Status Update
 
-    func updateStatus(isConnected: Bool, deviceName: String?, isForwarding: Bool = true, isGlobalForwarding: Bool = false) {
-        currentIsConnected = isConnected
-        currentDeviceName = deviceName
-        currentIsForwarding = isForwarding
-        currentIsGlobalForwarding = isGlobalForwarding
+    func update(_ input: HUDInput) {
+        lastInput = input
+        if let menu = statusItem?.menu {
+            rebuild(menu)
+        }
+        updateButtonAppearance()
+    }
 
-        // Rebuild the menu to reflect new state
-        statusItem?.menu = buildMenu()
-        updateButtonAppearance(isConnected: isConnected)
+    func updateStatus(isConnected: Bool, deviceName: String?, isForwarding: Bool = true, isGlobalForwarding: Bool = false) {
+        var input = inputProvider?() ?? lastInput
+        input.isConnected = isConnected
+        input.deviceName = deviceName
+        input.isForwarding = isForwarding
+        input.isGlobalForwarding = isGlobalForwarding
+        update(input)
+    }
+
+    // MARK: - NSMenuDelegate
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        if let inputProvider {
+            lastInput = inputProvider()
+        }
+        rebuild(menu)
     }
 
     // MARK: - Private
 
-    private func updateButtonAppearance(isConnected: Bool) {
+    private func updateButtonAppearance() {
         guard let button = statusItem?.button else {
             return
         }
 
+        let presentation = HUDPresentation.make(lastInput, bindings: KeyboardShortcutManager.shared.registeredShortcuts)
+        let isConnected = lastInput.isConnected
         let symbolName = isConnected ? "keyboard.badge.ellipsis" : "keyboard"
         let image = NSImage(
             systemSymbolName: symbolName,
-            accessibilityDescription: isConnected ? "Clak - Connected" : "Clak"
+            accessibilityDescription: "Clak, \(presentation.status)"
         )
         let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
         button.image = image?.withSymbolConfiguration(config)
+        button.contentTintColor = isConnected && lastInput.isForwarding ? .controlAccentColor : nil
+        button.toolTip = "Clak: \(presentation.status)"
+    }
 
-        if isConnected {
-            button.contentTintColor = .controlAccentColor
-        } else {
-            button.contentTintColor = nil
+    private func rebuild(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let specs = MenuModel.items(lastInput, bindings: KeyboardShortcutManager.shared.registeredShortcuts)
+        for spec in specs {
+            menu.addItem(makeItem(spec))
         }
     }
 
-    private func buildMenu() -> NSMenu {
-        let menu = NSMenu()
-
-        // Show Clak
-        let showItem = NSMenuItem(
-            title: "Show Clak",
-            action: #selector(handleShowMainWindow),
-            keyEquivalent: ""
-        )
-        showItem.target = self
-        showItem.image = NSImage(
-            systemSymbolName: "macwindow",
-            accessibilityDescription: "Show main window"
-        )
-        menu.addItem(showItem)
-
-        menu.addItem(.separator())
-
-        // Connection info
-        if currentIsConnected, let name = currentDeviceName {
-            let deviceItem = NSMenuItem(
-                title: name,
-                action: nil,
-                keyEquivalent: ""
-            )
-            deviceItem.isEnabled = false
-            deviceItem.image = NSImage(
-                systemSymbolName: "iphone.circle.fill",
-                accessibilityDescription: "Connected device"
-            )
-            menu.addItem(deviceItem)
-
-            // Toggle Forwarding
-            let forwardingItem = NSMenuItem(
-                title: currentIsForwarding ? "Pause Forwarding" : "Resume Forwarding",
-                action: #selector(handleToggleForwarding),
-                keyEquivalent: "f"
-            )
-            forwardingItem.target = self
-            forwardingItem.keyEquivalentModifierMask = [.command, .shift]
-            forwardingItem.image = NSImage(
-                systemSymbolName: currentIsForwarding ? "pause.circle" : "play.circle",
-                accessibilityDescription: currentIsForwarding ? "Pause forwarding" : "Resume forwarding"
-            )
-            menu.addItem(forwardingItem)
-
-            // Global Forwarding (type without keeping Clak focused)
-            let globalItem = NSMenuItem(
-                title: "Global Forwarding",
-                action: #selector(handleToggleGlobalForwarding),
-                keyEquivalent: "g"
-            )
-            globalItem.target = self
-            globalItem.keyEquivalentModifierMask = [.command, .shift]
-            globalItem.state = currentIsGlobalForwarding ? .on : .off
-            globalItem.image = NSImage(
-                systemSymbolName: "globe",
-                accessibilityDescription: "Toggle global forwarding"
-            )
-            menu.addItem(globalItem)
-
-            let reconnectItem = NSMenuItem(
-                title: "Reconnect",
-                action: #selector(handleReconnect),
-                keyEquivalent: "r"
-            )
-            reconnectItem.target = self
-            reconnectItem.keyEquivalentModifierMask = [.command, .shift]
-            reconnectItem.image = NSImage(
-                systemSymbolName: "arrow.triangle.2.circlepath",
-                accessibilityDescription: "Reconnect"
-            )
-            menu.addItem(reconnectItem)
-        } else {
-            let searchingItem = NSMenuItem(
-                title: "Searching...",
-                action: nil,
-                keyEquivalent: ""
-            )
-            searchingItem.isEnabled = false
-            searchingItem.image = NSImage(
-                systemSymbolName: "antenna.radiowaves.left.and.right",
-                accessibilityDescription: "Searching for device"
-            )
-            menu.addItem(searchingItem)
+    private func makeItem(_ spec: MenuItemSpec) -> NSMenuItem {
+        if spec.command == .separator {
+            return .separator()
         }
 
-        menu.addItem(.separator())
-
-        // Preferences
-        let prefsItem = NSMenuItem(
-            title: "Settings\u{2026}",
-            action: #selector(handleShowPreferences),
-            keyEquivalent: ","
-        )
-        prefsItem.target = self
-        prefsItem.image = NSImage(
-            systemSymbolName: "gearshape",
-            accessibilityDescription: "Open settings"
-        )
-        menu.addItem(prefsItem)
-
-        menu.addItem(.separator())
-
-        // Quit
-        let quitItem = NSMenuItem(
-            title: "Quit Clak",
-            action: #selector(handleQuit),
-            keyEquivalent: "q"
-        )
-        quitItem.target = self
-        quitItem.image = NSImage(
-            systemSymbolName: "power",
-            accessibilityDescription: "Quit application"
-        )
-        menu.addItem(quitItem)
-
-        return menu
+        let item = NSMenuItem(title: spec.title, action: nil, keyEquivalent: spec.keyEquivalent)
+        item.keyEquivalentModifierMask = spec.modifiers
+        item.isEnabled = spec.isEnabled
+        item.state = spec.isChecked ? .on : .off
+        item.representedObject = CommandBox(spec.command)
+        if spec.command != .none {
+            item.target = self
+            item.action = #selector(handleMenuItem(_:))
+        }
+        if let symbolName = spec.symbolName {
+            item.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        }
+        return item
     }
 
-    // MARK: - Actions
-
-    @objc private func handleShowMainWindow() {
-        onShowMainWindow?()
+    @objc private func handleMenuItem(_ sender: NSMenuItem) {
+        guard let command = (sender.representedObject as? CommandBox)?.command else {
+            return
+        }
+        switch command {
+        case .none, .separator: break
+        case .showWindow: onShowMainWindow?()
+        case .toggleForwarding: onToggleForwarding?()
+        case .toggleGlobalForwarding: onToggleGlobalForwarding?()
+        case .reconnect: onReconnect?()
+        case .openSystemSettings(let destination): PermissionChecker.open(destination)
+        case .showSettings: onShowPreferences?()
+        case .quit: onQuit?()
+        }
     }
+}
 
-    @objc private func handleShowPreferences() {
-        onShowPreferences?()
-    }
-
-    @objc private func handleToggleForwarding() {
-        onToggleForwarding?()
-    }
-
-    @objc private func handleToggleGlobalForwarding() {
-        onToggleGlobalForwarding?()
-    }
-
-    @objc private func handleReconnect() {
-        onReconnect?()
-    }
-
-    @objc private func handleQuit() {
-        onQuit?()
-    }
+private final class CommandBox {
+    let command: MenuItemSpec.Command
+    init(_ command: MenuItemSpec.Command) { self.command = command }
 }

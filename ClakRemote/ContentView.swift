@@ -213,6 +213,8 @@ private struct WaitingView: View {
     /// first round, so a round that ran out means it isn't listening.
     private var isRetrying: Bool { (controller.retryWindow?.attempt ?? 0) > 0 }
 
+    @State private var showsMacLink = false
+
     var body: some View {
         VStack(spacing: 16) {
             if case .error(let message) = controller.status {
@@ -253,6 +255,13 @@ private struct WaitingView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .padding(.top, 6)
+            }
+
+            // Experiment, only with -ClakRemoteMacLink YES
+            if let linker = MacLinker.shared, isRetrying {
+                Button("Connect from this iPhone") { showsMacLink = true }
+                    .buttonStyle(.bordered)
+                    .sheet(isPresented: $showsMacLink) { MacLinkSheet(linker: linker) }
             }
         }
         .animation(.easeInOut(duration: 0.3), value: headline)

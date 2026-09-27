@@ -46,4 +46,17 @@ final class PressedKeyTrackerTests: XCTestCase {
         tracker.reset()
         XCTAssertEqual(tracker.usages, [])
     }
+
+    func testReleaseOfAHeldKeyReturnsTheRemainingKeys() {
+        _ = tracker.keyDown(keyCode: 0, usage: 0x04)
+        _ = tracker.keyDown(keyCode: 1, usage: 0x16)
+        XCTAssertEqual(tracker.release(keyCode: 0), [0x16])
+    }
+
+    /// Nothing to release when the key-down was never forwarded.
+    func testReleaseOfAKeyNotHeldReturnsNil() {
+        _ = tracker.keyDown(keyCode: 0, usage: 0x04)
+        XCTAssertNil(tracker.release(keyCode: 99))
+        XCTAssertEqual(tracker.usages, [0x04])
+    }
 }

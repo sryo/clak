@@ -16,15 +16,31 @@ import IOKit.hid
 final class ScrollEnhancer {
     static let shared = ScrollEnhancer()
 
+    /// The tap runs on the tap thread; `eventTap` and `runLoopSource` are
+    /// only touched there, `engine` and `isRunning` only on main.
+    private let tapThread = EventTapThread.shared
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private let engine = GestureScrollEngine()
 
-    private var senderVerdicts: [UInt64: Bool] = [:]
+    /// A "yes" is permanent for a registry ID. A "no" can be wrong for a
+    /// moment — the Remote's HID service may still be registering — so it is
+    /// only trusted for a while, which still spares a registry walk per tick.
+    private let verdictLock = NSLock()
+    private var positiveSenders: Set<UInt64> = []
+    private var negativeVerdicts: [UInt64: Date] = [:]
+    static let negativeVerdictLifetime: TimeInterval = 5
+
+    private let resolver: (UInt64) -> Bool
+    private let clock: () -> Date
 
     private(set) var isRunning = false
 
-    private init() {}
+    init(resolver: @escaping (UInt64) -> Bool = ScrollEnhancer.resolveIsClakRemote,
+         clock: @escaping () -> Date = Date.init) {
+        self.resolver = resolver
+        self.clock = clock
+    }
 
     func start() {
         guard !isRunning else { return }
@@ -49,10 +65,17 @@ final class ScrollEnhancer {
             return
         }
 
-        eventTap = tap
-        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            CFMachPortInvalidate(tap)
+            Log.app.error("ScrollEnhancer: could not create run loop source")
+            return
+        }
+        tapThread.performAndWait { [self] in
+            eventTap = tap
+            runLoopSource = source
+            CFRunLoopAddSource(tapThread.runLoop, source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+        }
         isRunning = true
         Log.app.info("ScrollEnhancer: started")
     }
@@ -60,15 +83,18 @@ final class ScrollEnhancer {
     func stop() {
         guard isRunning else { return }
         engine.reset()
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
+        tapThread.performAndWait { [self] in
+            if let source = runLoopSource {
+                CFRunLoopRemoveSource(tapThread.runLoop, source, .commonModes)
+            }
+            if let tap = eventTap {
+                CGEvent.tapEnable(tap: tap, enable: false)
+                CFMachPortInvalidate(tap)
+            }
+            eventTap = nil
+            runLoopSource = nil
         }
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
-        eventTap = nil
-        runLoopSource = nil
-        senderVerdicts.removeAll()
+        clearVerdicts()
         isRunning = false
         Log.app.info("ScrollEnhancer: stopped")
     }
@@ -98,26 +124,50 @@ final class ScrollEnhancer {
 
         let linesY = Int(event.getIntegerValueField(.scrollWheelEventDeltaAxis1))
         let linesX = Int(event.getIntegerValueField(.scrollWheelEventDeltaAxis2))
-        engine.feed(linesY: linesY, linesX: linesX)
+        // The engine and its frame timer live on main
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.engine.feed(linesY: linesY, linesX: linesX)
+        }
         return nil // swallow the raw tick
     }
 
     /// Private CGEvent field carrying the sending HID service's registry entry ID.
     private static let senderIDField = CGEventField(rawValue: 87)!
 
-    private func isClakRemote(senderID: UInt64) -> Bool {
-        if let verdict = senderVerdicts[senderID] {
-            return verdict
+    func clearVerdicts() {
+        verdictLock.lock()
+        defer { verdictLock.unlock() }
+        positiveSenders.removeAll()
+        negativeVerdicts.removeAll()
+    }
+
+    /// Called from the tap thread; stop() clears the cache from main.
+    func isClakRemote(senderID: UInt64) -> Bool {
+        verdictLock.lock()
+        defer { verdictLock.unlock() }
+        if positiveSenders.contains(senderID) {
+            return true
         }
-        let verdict = Self.resolveIsClakRemote(senderID: senderID)
-        senderVerdicts[senderID] = verdict
+        let now = clock()
+        if let checked = negativeVerdicts[senderID],
+           now.timeIntervalSince(checked) < Self.negativeVerdictLifetime {
+            return false
+        }
+        let verdict = resolver(senderID)
+        if verdict {
+            positiveSenders.insert(senderID)
+            negativeVerdicts.removeValue(forKey: senderID)
+        } else {
+            negativeVerdicts[senderID] = now
+        }
         Log.app.info("ScrollEnhancer: sender \(senderID) → Clak Remote: \(verdict)")
         return verdict
     }
 
     /// Walk the IORegistry upward from the sending service looking for our
     /// device's identity (VID/PID set via the DIS PnP ID characteristic).
-    private static func resolveIsClakRemote(senderID: UInt64) -> Bool {
+    static func resolveIsClakRemote(senderID: UInt64) -> Bool {
         guard senderID != 0 else { return false }
         let service = IOServiceGetMatchingService(
             kIOMainPortDefault, IORegistryEntryIDMatching(senderID)

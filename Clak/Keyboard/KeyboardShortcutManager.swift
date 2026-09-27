@@ -15,20 +15,20 @@ enum ShortcutAction: String, Codable, CaseIterable {
     var displayName: String {
         switch self {
         case .pasteToDevice: return "Paste to Device"
-        case .toggleForwarding: return "Toggle Forwarding"
-        case .toggleGlobalForwarding: return "Toggle Global Forwarding"
+        case .toggleForwarding: return "Pause or Resume Forwarding"
+        case .toggleGlobalForwarding: return "Global Forwarding"
         case .disconnectDevice: return "Reconnect"
-        case .showPreferences: return "Show Preferences"
+        case .showPreferences: return "Show Settings"
         }
     }
 
     var displayDescription: String {
         switch self {
-        case .pasteToDevice: return "Paste clipboard text to the connected device"
-        case .toggleForwarding: return "Toggle keystroke forwarding on/off"
-        case .toggleGlobalForwarding: return "Type to the device without keeping Clak focused"
-        case .disconnectDevice: return "Disconnect and reconnect to the device"
-        case .showPreferences: return "Open the preferences window"
+        case .pasteToDevice: return "Types your clipboard on the device."
+        case .toggleForwarding: return "Keeps your keys on this Mac, or sends them again."
+        case .toggleGlobalForwarding: return "Type to the device from any app. Also how you leave it."
+        case .disconnectDevice: return "Advertises again so your device can reconnect."
+        case .showPreferences: return "Opens Clak\u{2019}s settings."
         }
     }
 }
@@ -65,9 +65,16 @@ final class KeyboardShortcutManager {
     /// True while a ShortcutRecorderView is capturing a chord. AppDelegate
     /// stands down its beep-suppression monitor and event forwarding so the
     /// recorder's own local monitor receives the keys.
-    var isRecording = false
+    var isRecording = false {
+        didSet { onChange?() }
+    }
 
-    private var shortcuts: [ShortcutBinding] = []
+    /// Called on every change to `isRecording` or the bindings.
+    var onChange: (() -> Void)?
+
+    private var shortcuts: [ShortcutBinding] = [] {
+        didSet { onChange?() }
+    }
 
     /// UserDefaults key for persisted shortcut data.
     private static let shortcutsDefaultsKey = "keyboardShortcuts"
@@ -87,7 +94,7 @@ final class KeyboardShortcutManager {
     /// - Cmd+Shift+V: Paste to device
     /// - Cmd+Shift+K: Toggle forwarding
     /// - Cmd+Shift+G: Toggle global forwarding
-    /// - Cmd+Shift+D: Disconnect device
+    /// - Cmd+Shift+D: Reconnect (re-advertise)
     func registerDefaults() {
         let cmdShiftFlags = CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue
 

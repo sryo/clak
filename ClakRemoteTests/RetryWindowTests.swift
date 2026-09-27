@@ -22,6 +22,18 @@ final class RetryWindowTests: XCTestCase {
         XCTAssertEqual(window.progress(at: start.addingTimeInterval(-3)), 0)
     }
 
+    func testLadderStartsWithTheNudgeAndAlternates() {
+        let actions = (0..<5).map { RemoteController.recoveryAction(afterAttempts: $0, policy: .ladder) }
+        XCTAssertEqual(actions, [.nudge, .republish, .nudge, .republish, .nudge])
+    }
+
+    func testSingleArmPolicies() {
+        for attempt in 0..<4 {
+            XCTAssertEqual(RemoteController.recoveryAction(afterAttempts: attempt, policy: .nudgeOnly), .nudge)
+            XCTAssertEqual(RemoteController.recoveryAction(afterAttempts: attempt, policy: .republishOnly), .republish)
+        }
+    }
+
     func testZeroDurationWindowIsAlreadyFull() {
         let window = RemoteController.RetryWindow(start: Date(), duration: 0, attempt: 2)
         XCTAssertEqual(window.progress(at: Date()), 1)

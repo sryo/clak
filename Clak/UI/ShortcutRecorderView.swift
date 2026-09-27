@@ -27,12 +27,16 @@ struct ShortcutRecorderView: View {
                 } label: {
                     Text(shortcutDisplayString)
                         .font(.system(.body, design: .rounded))
-                        .fontWeight(.medium)
+                        .fontWeight(currentShortcut == nil ? .regular : .medium)
+                        .foregroundStyle(currentShortcut == nil ? .secondary : .primary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
                 .modifier(KeyCapGlassModifier())
+                .help(currentShortcut == nil ? "Click to record a shortcut" : "Click to record a new shortcut")
+                .accessibilityLabel("\(action.displayName) shortcut")
+                .accessibilityValue(currentShortcut == nil ? "Not set" : shortcutDisplayString)
             }
 
             if let conflict = conflictMessage {
@@ -45,7 +49,7 @@ struct ShortcutRecorderView: View {
 
     private var shortcutDisplayString: String {
         guard let shortcut = currentShortcut else {
-            return "None"
+            return "Record Shortcut"
         }
         return formatShortcut(keyCode: shortcut.keyCode, modifiers: CGEventFlags(rawValue: shortcut.modifiers))
     }

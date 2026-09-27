@@ -30,6 +30,7 @@ struct GeneralSettingsView: View {
     @State private var launchAtLogin = AppPreferences.shared.launchAtLogin
     @State private var forwardingByDefault = AppPreferences.shared.forwardingEnabled
     @State private var trackpadScroll = AppPreferences.shared.trackpadScrollEnabled
+    @State private var permissions = PermissionSnapshot.current
 
     var body: some View {
         Form {
@@ -45,7 +46,7 @@ struct GeneralSettingsView: View {
                         }
                 }
 
-                LabeledContent("Forwarding enabled by default") {
+                LabeledContent("Start forwarding when Clak opens") {
                     Toggle("", isOn: $forwardingByDefault)
                         .labelsHidden()
                         .toggleStyle(.switch)
@@ -82,8 +83,8 @@ struct GeneralSettingsView: View {
                 PermissionRow(
                     icon: "keyboard.badge.eye",
                     title: "Input Monitoring",
-                    description: "Required to capture keystrokes and forward them via Bluetooth",
-                    isGranted: PermissionChecker.hasInputMonitoringPermission,
+                    description: "Lets Clak read your keys to send them to your device.",
+                    isGranted: permissions.inputMonitoring,
                     openSettingsAction: {
                         PermissionChecker.openInputMonitoringSettings()
                     }
@@ -92,8 +93,8 @@ struct GeneralSettingsView: View {
                 PermissionRow(
                     icon: "accessibility",
                     title: "Accessibility",
-                    description: "Required for Global Forwarding to type without keeping Clak focused",
-                    isGranted: PermissionChecker.hasAccessibilityPermission,
+                    description: "Lets Global Forwarding type from any app, without Clak in front.",
+                    isGranted: permissions.accessibility,
                     openSettingsAction: {
                         PermissionChecker.openAccessibilitySettings()
                     }
@@ -102,12 +103,10 @@ struct GeneralSettingsView: View {
                 PermissionRow(
                     icon: "antenna.radiowaves.left.and.right",
                     title: "Bluetooth",
-                    description: "Required to advertise as a wireless keyboard",
-                    isGranted: true,
+                    description: "Lets Clak show up as a keyboard on your device.",
+                    isGranted: permissions.bluetooth,
                     openSettingsAction: {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth") {
-                            NSWorkspace.shared.open(url)
-                        }
+                        PermissionChecker.openBluetoothPrivacySettings()
                     }
                 )
             } header: {
@@ -115,6 +114,25 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { permissions = .current }
+        // Permissions are granted in System Settings; re-read them on return
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            permissions = .current
+        }
+    }
+}
+
+struct PermissionSnapshot: Equatable {
+    var inputMonitoring: Bool
+    var accessibility: Bool
+    var bluetooth: Bool
+
+    static var current: PermissionSnapshot {
+        PermissionSnapshot(
+            inputMonitoring: PermissionChecker.hasInputMonitoringPermission,
+            accessibility: PermissionChecker.hasAccessibilityPermission,
+            bluetooth: PermissionChecker.isBluetoothAuthorized
+        )
     }
 }
 
@@ -162,6 +180,8 @@ struct PermissionRow: View {
             }
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(title), \(isGranted ? "allowed" : "not allowed")")
     }
 }
 

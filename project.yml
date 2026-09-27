@@ -31,6 +31,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.clak.app
         PRODUCT_NAME: Clak
+        # A team-signed identity keeps privacy grants (Input Monitoring,
+        # Bluetooth) across rebuilds; ad-hoc builds lose them every time
+        DEVELOPMENT_TEAM: CL6XWJCS9R
         INFOPLIST_FILE: Clak/Info.plist
         CODE_SIGN_ENTITLEMENTS: Clak/Clak.entitlements
         GENERATE_INFOPLIST_FILE: false
@@ -43,6 +46,8 @@ targets:
       - framework: IOBluetooth.framework
         embed: false
       - framework: CoreBluetooth.framework
+        embed: false
+      - framework: IOKit.framework
         embed: false
     postBuildScripts:
       - name: Sync VERSION into Info.plist
@@ -62,6 +67,7 @@ targets:
           - "**/.DS_Store"
       - path: Clak/Bluetooth/BLEHIDPeripheralManager.swift
       - path: Clak/Bluetooth/HIDReportMap.swift
+      - path: Clak/Bluetooth/PendingReportQueue.swift
       - path: Clak/Keyboard/KeyCodeTranslator.swift
       - path: Clak/Keyboard/CharacterComposer.swift
       - path: Clak/Utilities/Logger.swift
@@ -106,6 +112,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.clak.app.tests
         GENERATE_INFOPLIST_FILE: true
+        DEVELOPMENT_TEAM: CL6XWJCS9R
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Clak.app/Contents/MacOS/Clak"
     dependencies:

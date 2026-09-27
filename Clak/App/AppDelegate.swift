@@ -1,4 +1,5 @@
 import Cocoa
+import Observation
 
 final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDelegate {
     /// With @NSApplicationDelegateAdaptor, NSApp.delegate is SwiftUI's wrapper,
@@ -10,10 +11,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
     private let keyboardCapture = KeyboardEventCapture()
     private let modifierTracker = ModifierKeyTracker()
     private let pressedKeys = PressedKeyTracker()
+    private var globeTap = GlobeKeyTapDetector()
     private let shortcutManager = KeyboardShortcutManager.shared
     private let menuBarController = MenuBarController()
+    private lazy var keyRelease = KeyReleaseController(
+        pressedKeys: pressedKeys,
+        modifierTracker: modifierTracker,
+        sendRelease: { [weak self] in self?.bluetoothManager.sendKeyUp() }
+    )
 
-    private var isAppActive = false
+    /// Decides consumption on the tap thread; the work lands in applyKeyEvent on main.
+    private let keyTap = KeyTapRelay()
+
+    private var isAppActive = false {
+        didSet { refreshKeyGate() }
+    }
     private var localKeyMonitor: Any?
     private var windowTopLeft: NSPoint?
     private var windowObserver: NSObjectProtocol?
@@ -33,6 +45,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.app.info("Clak launching")
 
+        // The layout map reads Text Input Sources, which belong on the main thread
+        _ = KeyboardLayoutMapper.shared
+        keyRelease.onWake = { [weak self] in
+            self?.bluetoothManager.handleWake()
+        }
+
         // Configure main window as floating compact HUD
         DispatchQueue.main.async { [weak self] in
             self?.configureMainWindow()
@@ -40,6 +58,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
 
         // Set up menu bar
         menuBarController.setup()
+        menuBarController.inputProvider = { [weak self] in
+            guard let self else { return HUDInput() }
+            return HUDInput(self.appState)
+        }
         menuBarController.onShowMainWindow = {
             NSApp.activate(ignoringOtherApps: true)
             if let window = NSApp.windows.first(where: { $0.title == "Clak" || $0.isKeyWindow }) {
@@ -74,10 +96,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         }
 
         // Set up keyboard capture (will succeed only if permission was already granted)
+        keyTap.onRoute = { [weak self] event, route, snapshot in
+            self?.applyKeyEvent(event, route: route, snapshot: snapshot)
+        }
+        shortcutManager.onChange = { [weak self] in
+            self?.refreshKeyGate()
+        }
+        observeKeyGateInputs()
         keyboardCapture.delegate = self
         if keyboardCapture.startCapture() {
             appState.needsInputMonitoring = false
         }
+        refreshKeyGate()
+        refreshMenuBar()
 
         // Persisted global mode is only honored if Accessibility is still granted
         if appState.isGlobalForwarding && !PermissionChecker.hasAccessibilityPermission {
@@ -92,6 +123,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         }
         bluetoothManager.onLEDStateChange = { [weak self] capsLock in
             self?.appState.capsLockActive = capsLock
+            self?.refreshMenuBar()
+        }
+        bluetoothManager.onPairingStateChange = { [weak self] awaiting in
+            self?.appState.isAwaitingPairingConfirmation = awaiting
+            self?.refreshMenuBar()
         }
 
         // Auto-start advertising — BLE layer handles poweredOn callback
@@ -142,6 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         if appState.needsInputMonitoring && !keyboardCapture.isCapturing {
             if keyboardCapture.startCapture() {
                 appState.needsInputMonitoring = false
+                refreshKeyGate()
                 Log.app.info("Input Monitoring permission now granted, capture started")
             }
         }
@@ -150,12 +187,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         if appState.needsAccessibility && PermissionChecker.hasAccessibilityPermission {
             appState.needsAccessibility = false
             keyboardCapture.restartCapture()
+            refreshKeyGate()
             Log.app.info("Accessibility permission now granted")
         }
 
         if AppPreferences.shared.trackpadScrollEnabled && !ScrollEnhancer.shared.isRunning {
             ScrollEnhancer.shared.start()
         }
+        refreshMenuBar()
+    }
+
+    /// Clicking the Dock icon brings back a hidden HUD.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            menuBarController.onShowMainWindow?()
+        }
+        return true
     }
 
     func applicationDidResignActive(_ notification: Notification) {
@@ -167,10 +214,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         Log.app.debug("App resigned active")
     }
 
-    /// Stuck-key failsafe: clear the tracker and release everything on the device.
+    /// Stuck-key failsafe: clear the trackers and release everything on the device.
     private func releaseAllForwardedKeys() {
-        pressedKeys.reset()
-        bluetoothManager.sendKeyUp()
+        keyRelease.releaseAll(reason: "forwarding interrupted")
     }
 
     // MARK: - Window Configuration
@@ -244,16 +290,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         container.layer?.shadowOpacity = 0.4
         container.layer?.shadowRadius = 20
         container.layer?.shadowOffset = CGSize(width: 0, height: -4)
-        container.layer?.cornerRadius = 16
+        container.layer?.cornerRadius = HUDMetrics.cornerRadius
 
         // Inner effect view — clips to rounded corners
         let effectView = NSVisualEffectView()
         effectView.material = .hudWindow
         effectView.blendingMode = .behindWindow
         effectView.state = .active
-        effectView.appearance = NSAppearance(named: .darkAqua)
         effectView.wantsLayer = true
-        effectView.layer?.cornerRadius = 16
+        effectView.layer?.cornerRadius = HUDMetrics.cornerRadius
         effectView.layer?.masksToBounds = true
         effectView.layer?.borderWidth = 0.5
         effectView.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
@@ -312,6 +357,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         if appState.errorMessage != errorMessage {
             appState.errorMessage = errorMessage
         }
+        refreshKeyGate()
+        if let availability = BluetoothManager.availability(for: state, failure: bluetoothManager.lastFailure),
+           appState.bluetooth != availability {
+            appState.bluetooth = availability
+        }
 
         // Update menu bar
         refreshMenuBar()
@@ -332,13 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         bluetoothManager.sendText(text)
     }
 
-    // MARK: - KeyboardEventCaptureDelegate
-
-    /// True when global forwarding should swallow events system-wide.
-    private var isConsumingGlobally: Bool {
-        appState.isGlobalForwarding && appState.isForwarding && appState.isConnected
-            && keyboardCapture.isConsumeCapable
-    }
+    // MARK: - Key Gate
 
     /// True while a recorder in the Shortcuts tab owns the keyboard. Gated on
     /// isAppActive so a recorder left open doesn't stall global forwarding —
@@ -347,55 +391,124 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         isAppActive && shortcutManager.isRecording
     }
 
+    /// Publishes what the tap thread needs to decide consumption. Called on
+    /// main after anything it reads changes.
+    private func refreshKeyGate() {
+        keyTap.publish(KeyGateSnapshot(
+            isAppActive: isAppActive,
+            isGlobalForwarding: appState.isGlobalForwarding,
+            isForwarding: appState.isForwarding,
+            isConnected: appState.isConnected,
+            isRecording: shortcutManager.isRecording,
+            isConsumeCapable: keyboardCapture.isConsumeCapable,
+            shortcuts: shortcutManager.registeredShortcuts
+        ))
+    }
+
+    /// Republishes whenever AppState's gating inputs change, whoever changes
+    /// them (menu, AppleScript, Bluetooth callbacks).
+    private func observeKeyGateInputs() {
+        withObservationTracking {
+            _ = appState.isGlobalForwarding
+            _ = appState.isForwarding
+            _ = appState.isConnected
+        } onChange: {
+            // onChange fires before the new value is stored
+            DispatchQueue.main.async {
+                AppDelegate.shared?.refreshKeyGate()
+                AppDelegate.shared?.observeKeyGateInputs()
+            }
+        }
+    }
+
+    // MARK: - KeyboardEventCaptureDelegate (tap thread)
+
     func keyboardCapture(_ capture: KeyboardEventCapture, didCaptureKeyDown keyCode: UInt16, modifiers: CGEventFlags, isAutorepeat: Bool) -> Bool {
-        let modifierByte = modifierTracker.update(with: modifiers)
+        keyTap.route(.keyDown(keyCode: keyCode, modifiers: modifiers, isAutorepeat: isAutorepeat))
+    }
 
-        guard isAppActive || appState.isGlobalForwarding, appState.isConnected else {
-            return false
+    func keyboardCapture(_ capture: KeyboardEventCapture, didCaptureKeyUp keyCode: UInt16, modifiers: CGEventFlags) -> Bool {
+        keyTap.route(.keyUp(keyCode: keyCode, modifiers: modifiers))
+    }
+
+    func keyboardCapture(_ capture: KeyboardEventCapture, didCaptureModifierChange modifiers: CGEventFlags, keyCode: UInt16) -> Bool {
+        // Whether this completes a Globe tap is known only on main, where
+        // the detector lives; it changes the action, not the consumption
+        keyTap.route(.modifiersChanged(keyCode: keyCode, modifiers: modifiers, globeTapped: false))
+    }
+
+    func keyboardCaptureDidDropEvents(_ capture: KeyboardEventCapture) {
+        keyTap.deliver { [weak self] in
+            self?.keyRelease.captureDidDropEvents()
         }
+    }
 
-        // While recording, keys belong to the recorder's monitor — don't
-        // match shortcuts (a colliding chord would fire its action) or forward
-        if isRecordingShortcut {
-            return false
+    // MARK: - Key Events (main)
+
+    /// The stateful half of a routed event: trackers always follow the
+    /// physical keyboard, sends and echo only when the route says so.
+    private func applyKeyEvent(_ event: KeyEventInput, route: KeyRoute, snapshot: KeyGateSnapshot) {
+        switch event {
+        case let .keyDown(keyCode, modifiers, _):
+            let modifierByte = modifierTracker.update(with: modifiers)
+            globeTap.otherInput()
+
+            switch route.action {
+            case .shortcut(let action):
+                handleShortcutAction(action)
+                refreshKeyGate()
+            case .consumer(let usage):
+                bluetoothManager.sendConsumerKey(usage: usage)
+            case .key(let usage):
+                // Send the full pressed-key set (6KRO) so chords don't drop keys
+                let keys = pressedKeys.keyDown(keyCode: keyCode, usage: usage)
+                bluetoothManager.sendKeyboardReport(modifiers: modifierByte, keyCodes: keys)
+                echo(keyCode: keyCode, modifiers: modifiers)
+            case .none, .sendPressedKeys, .globe:
+                break
+            }
+
+        case let .keyUp(keyCode, modifiers):
+            // Mirror the physical keyboard even when the gate is closed, so the
+            // tracker can't hold keys whose release arrived while not forwarding
+            // A key whose down was forwarded is always released, whatever the
+            // gate says now: the down may have been applied after a release-all
+            // or a gate change, and iOS would autorepeat it forever.
+            let modifierByte = modifierTracker.update(with: modifiers)
+            if let keys = pressedKeys.release(keyCode: keyCode) {
+                // Release only this key — still-held keys and modifiers stay in the report
+                bluetoothManager.sendKeyboardReport(modifiers: modifierByte, keyCodes: keys)
+            }
+
+        case let .modifiersChanged(keyCode, modifiers, _):
+            // Track the Globe key even with the gate closed, so a tap can't be
+            // half-seen when forwarding resumes
+            let isGlobe = GlobeKeyTapDetector.keyCodes.contains(keyCode)
+            var globeTapped = false
+            if isGlobe {
+                globeTapped = globeTap.globeChanged(isDown: modifiers.contains(.maskSecondaryFn))
+            } else {
+                globeTap.otherInput()
+            }
+            let modifierByte = modifierTracker.update(with: modifiers)
+
+            let action = isGlobe
+                ? KeyEventRouter.route(snapshot, .modifiersChanged(keyCode: keyCode, modifiers: modifiers, globeTapped: globeTapped)).action
+                : route.action
+            switch action {
+            case .globe:
+                // A Globe tap switches the device's keyboard layout, as on an iPad
+                bluetoothManager.sendConsumerKey(usage: ConsumerKeyMapper.globeUsage)
+            case .sendPressedKeys:
+                // Modifier change must not release keys that are still held
+                bluetoothManager.sendKeyboardReport(modifiers: modifierByte, keyCodes: pressedKeys.usages)
+            case .none, .shortcut, .consumer, .key:
+                break
+            }
         }
+    }
 
-        // Decide consumption up front so a chord that flips state (e.g. the
-        // global-mode escape shortcut) is itself consumed under pre-toggle rules
-        let consuming = isConsumingGlobally
-
-        // Shortcuts run before everything — the escape chord must always work
-        if !isAutorepeat, let action = shortcutManager.matchShortcut(keyCode: keyCode, modifiers: modifiers) {
-            handleShortcutAction(action)
-            return consuming
-        }
-
-        guard appState.isForwarding else {
-            return false
-        }
-
-        // Swallow macOS autorepeats — the HID host (iOS) repeats held keys itself
-        if isAutorepeat {
-            return consuming
-        }
-
-        // Media keys: F7–F12 → consumer usages (play/pause, volume, ...)
-        if let consumerUsage = ConsumerKeyMapper.usage(for: keyCode) {
-            bluetoothManager.sendConsumerKey(usage: consumerUsage)
-            return consuming
-        }
-
-        // Translate keycode to HID usage
-        guard let hidUsage = KeyCodeTranslator.hidUsageCode(from: keyCode) else {
-            Log.keyboard.debug("No HID mapping for keycode: \(keyCode)")
-            return consuming
-        }
-
-        // Send the full pressed-key set (6KRO) so chords don't drop keys
-        let snapshot = pressedKeys.keyDown(keyCode: keyCode, usage: hidUsage)
-        bluetoothManager.sendKeyboardReport(modifiers: modifierByte, keyCodes: snapshot)
-
-        // Update text echo area
+    private func echo(keyCode: UInt16, modifiers: CGEventFlags) {
         switch keyCode {
         case 51, 117: // Backspace, Forward Delete
             appState.removeLastCharacter()
@@ -406,51 +519,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         case 53, 126, 125, 123, 124: // Escape, arrows — ignore
             break
         default:
-            if let character = characterForKeyCode(keyCode, modifiers: modifiers) {
-                appState.appendText(String(character))
+            if let text = echoText(forKeyCode: keyCode, modifiers: modifiers) {
+                appState.appendText(text)
             }
         }
-
-        return consuming
-    }
-
-    func keyboardCapture(_ capture: KeyboardEventCapture, didCaptureKeyUp keyCode: UInt16, modifiers: CGEventFlags) -> Bool {
-        // Mirror the physical keyboard even when the gate is closed, so the
-        // tracker can't hold keys whose release arrived while not forwarding
-        let snapshot = pressedKeys.keyUp(keyCode: keyCode)
-        let modifierByte = modifierTracker.update(with: modifiers)
-
-        guard isAppActive || appState.isGlobalForwarding,
-              appState.isForwarding, appState.isConnected,
-              !isRecordingShortcut else {
-            return false
-        }
-
-        // Release only this key — still-held keys and modifiers stay in the report
-        bluetoothManager.sendKeyboardReport(modifiers: modifierByte, keyCodes: snapshot)
-        return isConsumingGlobally
-    }
-
-    func keyboardCapture(_ capture: KeyboardEventCapture, didCaptureModifierChange modifiers: CGEventFlags) -> Bool {
-        guard isAppActive || appState.isGlobalForwarding,
-              appState.isForwarding, appState.isConnected,
-              !isRecordingShortcut else {
-            // Still track modifiers even when not forwarding so state is correct when we resume
-            modifierTracker.update(with: modifiers)
-            return false
-        }
-
-        let modifierByte = modifierTracker.update(with: modifiers)
-
-        // Modifier change must not release keys that are still held
-        bluetoothManager.sendKeyboardReport(modifiers: modifierByte, keyCodes: pressedKeys.usages)
-        return isConsumingGlobally
     }
 
     // MARK: - Shortcut Handling
 
     private func toggleForwarding() {
         appState.isForwarding.toggle()
+        refreshKeyGate()
         if !appState.isForwarding {
             releaseAllForwardedKeys()
         }
@@ -463,6 +542,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         } else {
             guard PermissionChecker.hasAccessibilityPermission else {
                 appState.needsAccessibility = true
+                refreshMenuBar()
                 PermissionChecker.requestAccessibilityPermission()
                 Log.app.warning("Global forwarding requires Accessibility permission")
                 return
@@ -477,17 +557,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
         releaseAllForwardedKeys()
         // Recreate the tap so it reflects current Accessibility permission (.defaultTap vs listen-only)
         keyboardCapture.restartCapture()
+        refreshKeyGate()
         refreshMenuBar()
         Log.app.info("Global forwarding \(enabled ? "enabled" : "disabled")")
     }
 
     private func refreshMenuBar() {
-        menuBarController.updateStatus(
-            isConnected: appState.isConnected,
-            deviceName: appState.connectedDeviceName,
-            isForwarding: appState.isForwarding,
-            isGlobalForwarding: appState.isGlobalForwarding
-        )
+        menuBarController.update(HUDInput(appState))
     }
 
     private func handleShortcutAction(_ action: ShortcutAction) {
@@ -510,42 +586,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, KeyboardEventCaptureDe
 
     // MARK: - Character Resolution
 
-    /// Attempt to resolve a displayable character from a keycode and modifier state.
-    /// This is used for the text echo area, not for HID report generation.
-    private func characterForKeyCode(_ keyCode: UInt16, modifiers: CGEventFlags) -> Character? {
-        // Create a CGEvent to get the character representation
+    /// The displayable text a keycode produces under a modifier state, for
+    /// the echo area only — HID reports never depend on it.
+    private func echoText(forKeyCode keyCode: UInt16, modifiers: CGEventFlags) -> String? {
         guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) else {
             return nil
         }
-
-        // Apply current modifier flags
         event.flags = modifiers
 
-        // Get the character from the event
         var length = 0
         event.keyboardGetUnicodeString(maxStringLength: 0, actualStringLength: &length, unicodeString: nil)
-
         guard length > 0 else {
             return nil
         }
 
         var chars = [UniChar](repeating: 0, count: length)
         event.keyboardGetUnicodeString(maxStringLength: length, actualStringLength: &length, unicodeString: &chars)
-
         guard length > 0 else {
             return nil
         }
 
-        // Filter out non-printable characters except newline and tab
-        guard let scalar = UnicodeScalar(chars[0]) else {
-            return nil
-        }
-        let char = Character(scalar)
-
-        if char.isNewline || char == "\t" || (scalar.value >= 0x20 && scalar.value < 0x7F) {
-            return char
-        }
-
-        return nil
+        let text = EchoText.displayable(String(utf16CodeUnits: chars, count: length))
+        return text.isEmpty ? nil : text
     }
 }

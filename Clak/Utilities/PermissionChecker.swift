@@ -1,4 +1,5 @@
 import Cocoa
+import CoreBluetooth
 import IOBluetooth
 
 enum PermissionChecker {
@@ -13,7 +14,12 @@ enum PermissionChecker {
         CGRequestListenEventAccess()
     }
 
+    /// Asks first: the app only appears in the Input Monitoring list once it
+    /// has requested access, so opening the pane alone shows nothing to turn on.
     static func openInputMonitoringSettings() {
+        if !hasInputMonitoringPermission {
+            requestInputMonitoringPermission()
+        }
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") else {
             return
         }
@@ -31,7 +37,12 @@ enum PermissionChecker {
         AXIsProcessTrustedWithOptions(options)
     }
 
+    /// Same gap as Input Monitoring: only the prompting trust check adds the
+    /// app to the Accessibility list, so ask before opening the pane.
     static func openAccessibilitySettings() {
+        if !hasAccessibilityPermission {
+            requestAccessibilityPermission()
+        }
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
             return
         }
@@ -51,10 +62,36 @@ enum PermissionChecker {
         return controller.powerState == kBluetoothHCIPowerStateON
     }
 
+    /// App-level Bluetooth permission. `.notDetermined` counts as granted:
+    /// the system asks on first use and the user hasn't said no.
+    static var isBluetoothAuthorized: Bool {
+        switch CBManager.authorization {
+        case .allowedAlways, .notDetermined: true
+        case .denied, .restricted: false
+        @unknown default: true
+        }
+    }
+
     static func openBluetoothSettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings") else {
             return
         }
         NSWorkspace.shared.open(url)
+    }
+
+    static func openBluetoothPrivacySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    static func open(_ destination: SettingsDestination) {
+        switch destination {
+        case .bluetooth: openBluetoothSettings()
+        case .bluetoothPrivacy: openBluetoothPrivacySettings()
+        case .inputMonitoring: openInputMonitoringSettings()
+        case .accessibility: openAccessibilitySettings()
+        }
     }
 }

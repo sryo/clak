@@ -1,4 +1,5 @@
 import XCTest
+import CoreBluetooth
 @testable import ClakRemote
 
 /// Exercises the shared Clak sources in their iOS compilation — the
@@ -47,6 +48,52 @@ final class SharedCodeTests: XCTestCase {
         let map = HIDReportMap(includeHorizontalScroll: false)
         XCTAssertEqual(map.mouseReportSize, 4)
         XCTAssertEqual(map.descriptor.count, 159)
+    }
+
+    // MARK: - GATT layout (Clak Remote's variant)
+
+    /// No Generic Attribute service of our own on iOS: the system GATT server
+    /// owns 0x1801 there. The HID service must still carry the Remote's map.
+    func testRemoteServiceList() throws {
+        let map = HIDReportMap(includeHorizontalScroll: true, highResolutionScroll: true)
+        let list = BLEHIDPeripheralManager.makeServiceList(reportMap: map,
+                                                           publishesGenericAttributeService: false)
+        XCTAssertEqual(list.services.map(\.0), ["_warmup", "HID", "DeviceInfo"])
+        XCTAssertNil(list.parts.serviceChanged)
+        let reportMap = try XCTUnwrap(list.parts.hid.service.characteristics?
+            .first { $0.uuid == BLEHIDPeripheralManager.GATT.reportMap } as? CBMutableCharacteristic)
+        XCTAssertEqual(reportMap.value, Data(map.descriptor))
+    }
+
+    /// The absolute pointer (experiment) goes last in the HID service, so a
+    /// Mac bonded before keeps every other handle.
+    func testAbsolutePointerCharacteristicGoesLast() throws {
+        let map = HIDReportMap(includeHorizontalScroll: true, highResolutionScroll: true,
+                               includeAbsolutePointer: true)
+        let parts = BLEHIDPeripheralManager.makeServiceList(reportMap: map,
+                                                            publishesGenericAttributeService: false).parts
+        let absolute = try XCTUnwrap(parts.hid.absolutePointerInput)
+        XCTAssertTrue(parts.hid.service.characteristics?.last === absolute)
+        let reference = absolute.descriptors?.first { $0.uuid == CBUUID(string: "2908") }?.value as? Data
+        XCTAssertEqual(reference, Data([0x04, 0x01]))
+
+        let plain = BLEHIDPeripheralManager.makeServiceList(
+            reportMap: HIDReportMap(includeHorizontalScroll: true, highResolutionScroll: true),
+            publishesGenericAttributeService: false).parts
+        XCTAssertNil(plain.hid.absolutePointerInput)
+        XCTAssertEqual(plain.hid.service.characteristics?.count, 8)
+    }
+
+    // MARK: - PendingReportQueue (the trackpad is what backs the queue up)
+
+    func testQueuedTrackpadMotionCoalesces() {
+        final class Target {}
+        let mouse = Target()
+        var queue = PendingReportQueue<Target>(capacity: 64)
+        for _ in 0..<10 {
+            queue.enqueue(Data([0, 5, 3, 0, 0]), on: mouse, kind: .mouse)
+        }
+        XCTAssertEqual(queue.entries.map(\.data), [Data([0, 50, 30, 0, 0])])
     }
 
     // MARK: - KeyCodeTranslator (character map used by RemoteController.type)

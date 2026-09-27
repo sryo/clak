@@ -129,8 +129,21 @@ final class RemoteController {
         includeHorizontalScroll: true,
         highResolutionScroll: true,
         restoreIdentifier: "com.clak.remote.peripheral",
-        publishesGenericAttributeService: false
+        publishesGenericAttributeService: false,
+        includeAbsolutePointer: RemoteController.absolutePointerExperiment
     )
+
+    /// `-ClakRemoteAbsolutePointer YES`: publish an absolute pointer report
+    /// and point at the screen by touch. An experiment — it changes the
+    /// report map, so the Mac must re-read it (republish, or forget and pair).
+    static let absolutePointerExperiment = UserDefaults.standard.bool(forKey: "ClakRemoteAbsolutePointer")
+
+    /// Touching the pad points at the same spot on the Mac's screen. Only
+    /// once the Mac subscribed to the absolute report, so a Mac still on the
+    /// old cached map keeps the relative trackpad.
+    var isPointingAtScreen: Bool {
+        Self.absolutePointerExperiment && peripheral.hostSubscribedToAbsolutePointer
+    }
 
     /// One FIFO for every send with delivery-order semantics (keystrokes and
     /// consumer taps). Drained by BLE backpressure, not by timers: each send
@@ -171,6 +184,50 @@ final class RemoteController {
         min(firstRepublishDelay * pow(2, Double(attempts)), maxRepublishDelay)
     }
 
+    /// What an unanswered round does: a database nudge (the system indicates
+    /// Service Changed, HID handles stay put) or a full republish.
+    enum RecoveryAction: String {
+        case nudge, republish
+    }
+
+    /// Which recovery a round uses. `ladder` alternates, starting with the
+    /// cheap nudge, so the proven republish is never far away. The others
+    /// exist to compare arms on device.
+    enum RecoveryPolicy: String {
+        case ladder, nudgeOnly, republishOnly
+    }
+
+    static func recoveryAction(afterAttempts attempts: Int, policy: RecoveryPolicy) -> RecoveryAction {
+        switch policy {
+        case .nudgeOnly: .nudge
+        case .republishOnly: .republish
+        case .ladder: attempts.isMultiple(of: 2) ? .nudge : .republish
+        }
+    }
+
+    /// Experiment knobs, read from launch arguments (e.g.
+    /// `-ClakRemoteRecoveryPolicy nudgeOnly`), which land in UserDefaults.
+    private static let recoveryPolicy = RecoveryPolicy(
+        rawValue: UserDefaults.standard.string(forKey: "ClakRemoteRecoveryPolicy") ?? "") ?? .ladder
+    private static let nudgeStyle = DatabaseNudgeStyle(
+        rawValue: UserDefaults.standard.string(forKey: "ClakRemoteNudgeStyle") ?? "") ?? .trailingEmpty
+    private static let settleNudgeAfterRepublish = UserDefaults.standard.bool(forKey: "ClakRemoteSettleNudge")
+    private static let manualNudgeForTesting = UserDefaults.standard.bool(forKey: "ClakRemoteManualNudge")
+
+    /// The last recovery step, so a connect can say what brought the host back.
+    private struct RecoveryEvent {
+        let label: String
+        let attempt: Int
+        let at: Date
+    }
+
+    @ObservationIgnored
+    private var lastRecovery: RecoveryEvent?
+    @ObservationIgnored
+    private var pendingSettleNudge = false
+    @ObservationIgnored
+    private var manualNudgeTimer: Timer?
+
     @ObservationIgnored
     private var advertisingStartedAt: Date?
 
@@ -181,6 +238,14 @@ final class RemoteController {
 
     init() {
         peripheral.delegate = self
+        peripheral.databaseNudge = Self.nudgeStyle
+        if Self.manualNudgeForTesting {
+            // Every 20 s even while connected, so PacketLogger can see what
+            // the system's Service Changed indication carries
+            manualNudgeTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+                self?.peripheral.nudgeDatabaseChange(reason: "manual", force: true)
+            }
+        }
 
         keyboardObservers = [
             NotificationCenter.default.addObserver(
@@ -219,6 +284,7 @@ final class RemoteController {
             // Opening the app is a fresh attempt, so recovery starts prompt
             // again instead of inheriting a previous session's backoff.
             republishCount = 0
+            lastRecovery = nil
             peripheral.startAdvertising()
         }
         syncRepublishTimer()
@@ -260,17 +326,48 @@ final class RemoteController {
         let task = DispatchWorkItem { [weak self] in
             guard let self, self.peripheral.isAdvertising, !self.isBackgrounded else { return }
             self.republishCount += 1
-            Log.bluetooth.notice("Remote: no host after \(delay, format: .fixed(precision: 0), privacy: .public)s — republish #\(self.republishCount, privacy: .public)")
+            let action = Self.recoveryAction(afterAttempts: self.republishCount - 1, policy: Self.recoveryPolicy)
+            Log.bluetooth.notice("Remote: no host after \(delay, format: .fixed(precision: 0), privacy: .public)s — \(action.rawValue, privacy: .public) #\(self.republishCount, privacy: .public)")
             // A host part-way through discovery or pairing would be broken by
             // the database going out from under it; give it another round.
             if self.peripheral.hasCentral {
                 self.syncRepublishTimer()
+            } else if action == .nudge,
+                      self.peripheral.nudgeDatabaseChange(reason: "timer#\(self.republishCount)") {
+                self.noteRecovery("nudge")
+                // Advertising carries on, so nothing else re-arms the timer
+                self.syncRepublishTimer()
             } else {
+                self.noteRecovery("republish")
+                self.pendingSettleNudge = Self.settleNudgeAfterRepublish
                 self.peripheral.republish()
             }
         }
         republishTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: task)
+    }
+
+    private func noteRecovery(_ label: String) {
+        lastRecovery = RecoveryEvent(label: label, attempt: republishCount, at: Date())
+    }
+
+    /// One greppable line per claim, attributing it to the recovery step that
+    /// preceded it within 10 s. A healthy bonded Mac subscribes about 1.1 s
+    /// in with no step at all. Search Console for "Recovery:".
+    private func logRecoveryClaim() {
+        let label: String
+        var sinceAction = ""
+        if let event = lastRecovery, Date().timeIntervalSince(event.at) < 10 {
+            label = "\(event.label)#\(event.attempt)"
+            sinceAction = String(format: " (+%.1fs after action)", Date().timeIntervalSince(event.at))
+        } else {
+            label = "none"
+        }
+        let tallyKey = "recovery.tally.\(label.split(separator: "#").first ?? "none")"
+        let tally = UserDefaults.standard.integer(forKey: tallyKey) + 1
+        UserDefaults.standard.set(tally, forKey: tallyKey)
+        Log.bluetooth.notice("Recovery: claimed \(self.secondsSinceAdvertising(), privacy: .public) via \(label, privacy: .public)\(sinceAction, privacy: .public) style=\(Self.nudgeStyle.rawValue, privacy: .public) policy=\(Self.recoveryPolicy.rawValue, privacy: .public) tally=\(tally, privacy: .public)")
+        lastRecovery = nil
     }
 
     private func secondsSinceAdvertising() -> String {
@@ -496,6 +593,17 @@ final class RemoteController {
     @ObservationIgnored
     private var dragModifiers: UInt8 = 0
 
+    /// Points at a spot given as fractions of the pad, 0...1 from the top
+    /// left, stretched over the whole screen. Held buttons ride along, so a
+    /// drag keeps its grip.
+    func pointAt(fractionX: Double, fractionY: Double) {
+        noteInteraction()
+        let scale = Double(HIDReportMap.absolutePointerMax)
+        let x = UInt16((min(max(fractionX, 0), 1) * scale).rounded())
+        let y = UInt16((min(max(fractionY, 0), 1) * scale).rounded())
+        peripheral.sendAbsolutePointerReport(buttons: heldMouseButtons, x: x, y: y)
+    }
+
     func mouseMove(dx: Int8, dy: Int8) {
         noteInteraction()
         peripheral.sendMouseReport(buttons: heldMouseButtons, dx: dx, dy: dy, wheel: 0)
@@ -573,6 +681,25 @@ extension RemoteController: BLEHIDPeripheralDelegate {
 
     func peripheralDidPublishServices() {
         servicesPublished = true
+        // Tests whether a republish fails because the host rediscovers
+        // mid-rebuild: one more change once the database is whole
+        if pendingSettleNudge {
+            pendingSettleNudge = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self, self.peripheral.nudgeDatabaseChange(reason: "post-republish-settle") else { return }
+                self.noteRecovery("settle-nudge")
+            }
+        }
+    }
+
+    func peripheralDidNudgeDatabase(reason: String, action: String) {
+        // Timer nudges are recorded where they start; these come from the
+        // manager's own read and Control Point triggers
+        if reason.hasPrefix("quiet") {
+            noteRecovery("read-nudge")
+        } else if reason.hasPrefix("control-point") {
+            noteRecovery("cp-nudge")
+        }
     }
 
     func peripheralDidStartAdvertising() {
@@ -588,14 +715,15 @@ extension RemoteController: BLEHIDPeripheralDelegate {
         syncRepublishTimer()
     }
 
-    func peripheralDidConnect(central: CBCentral) {
+    func peripheralDidConnect(central: HIDCentral) {
         Log.bluetooth.notice("Remote: connected \(self.secondsSinceAdvertising(), privacy: .public)")
+        logRecoveryClaim()
         status = .connected
         republishCount = 0
         syncRepublishTimer()
     }
 
-    func peripheralDidDisconnect(central: CBCentral) {
+    func peripheralDidDisconnect(central: HIDCentral) {
         status = .waitingForBluetooth
         heldMouseButtons = 0
         sendQueue.removeAll()

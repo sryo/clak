@@ -1,5 +1,32 @@
 import SwiftUI
 
+// MARK: - Status Dot
+
+/// The HUD's state dot, colored and labelled by HUDPresentation.
+struct HUDStatusDot: View {
+    let presentation: HUDPresentation
+    var size: CGFloat = 7
+
+    var body: some View {
+        PulsingIndicatorDot(color: presentation.tone.color, isPulsing: presentation.isPulsing, size: size)
+            .accessibilityElement()
+            .accessibilityLabel(presentation.accessibilityLabel)
+    }
+}
+
+extension HUDPresentation.Tone {
+    var color: Color {
+        switch self {
+        case .ready: .green
+        case .global: .accentColor
+        case .paused: .secondary
+        case .waiting: .orange
+        case .attention: .yellow
+        case .error: .red
+        }
+    }
+}
+
 // MARK: - Pulsing Indicator Dot
 
 struct PulsingIndicatorDot: View {
@@ -7,13 +34,15 @@ struct PulsingIndicatorDot: View {
     let isPulsing: Bool
     var size: CGFloat = 7
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         ZStack {
             Circle()
                 .fill(color)
                 .frame(width: size, height: size)
 
-            if isPulsing {
+            if isPulsing && !reduceMotion {
                 // phaseAnimator instead of withAnimation(.repeatForever):
                 // repeatForever in a global transaction leaks into unrelated
                 // view changes (the connect crossfade), blinking the whole HUD

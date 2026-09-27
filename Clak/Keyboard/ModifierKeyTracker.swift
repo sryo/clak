@@ -36,7 +36,7 @@ final class ModifierKeyTracker {
     func update(with flags: CGEventFlags) -> UInt8 {
         let newModifiers = KeyCodeTranslator.modifierByte(from: flags)
         if newModifiers != currentModifiers {
-            Log.keyboard.debug("Modifier state changed: 0x\(String(newModifiers, radix: 16)) (was 0x\(String(self.currentModifiers, radix: 16)))")
+            Log.keyboard.debug("Modifier state changed: 0x\(String(newModifiers, radix: 16), privacy: .private) (was 0x\(String(self.currentModifiers, radix: 16), privacy: .private))")
             currentModifiers = newModifiers
         }
         return currentModifiers

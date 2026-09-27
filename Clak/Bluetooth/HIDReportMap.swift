@@ -20,18 +20,28 @@ struct HIDReportMap: Equatable {
     /// (iOS) opts in; Clak (macOS) keeps its original descriptor.
     let highResolutionScroll: Bool
 
+    /// Adds an absolute pointer (Report ID 4): touching the phone points at
+    /// the same spot on the Mac's screen. An experiment, ClakRemote only —
+    /// it changes the report map, so a Mac bonded before must re-read it.
+    let includeAbsolutePointer: Bool
+
     /// Apple's formula for a relative element's resolution: logical range
     /// times ten to the minus unit exponent, over physical range. Here
     /// 254 × 100 / 20.
     static let highResolutionScrollCountsPerInch = 1270
 
-    init(includeHorizontalScroll: Bool, highResolutionScroll: Bool = false) {
+    init(includeHorizontalScroll: Bool, highResolutionScroll: Bool = false, includeAbsolutePointer: Bool = false) {
         self.includeHorizontalScroll = includeHorizontalScroll
         self.highResolutionScroll = highResolutionScroll
+        self.includeAbsolutePointer = includeAbsolutePointer
     }
 
     static let keyboardReportSize = 8
     static let consumerReportSize = 2
+    /// `[buttons, xLo, xHi, yLo, yHi, wheel]`
+    static let absolutePointerReportSize = 6
+    /// X and Y run 0...absolutePointerMax across the whole screen.
+    static let absolutePointerMax: UInt16 = 32767
 
     var mouseReportSize: Int {
         includeHorizontalScroll ? 5 : 4
@@ -48,6 +58,13 @@ struct HIDReportMap: Equatable {
             + (includeHorizontalScroll ? Self.acPanBlock : [])
             + (highResolutionScroll ? Self.scrollPhysicalReset : [])
             + Self.descriptorEnd
+            + (includeAbsolutePointer ? Self.absolutePointerBlock : [])
+    }
+
+    /// FNV-1a of the descriptor: stable across launches (unlike hashValue),
+    /// so a stored copy can tell whether the map a host cached still matches.
+    var fingerprint: UInt32 {
+        descriptor.reduce(2_166_136_261) { ($0 ^ UInt32($1)) &* 16_777_619 }
     }
 
     private static let baseDescriptor: [UInt8] = [
@@ -175,6 +192,55 @@ struct HIDReportMap: Equatable {
         0x75, 0x08,       //     Report Size (8)
         0x95, 0x01,       //     Report Count (1)
         0x81, 0x06,       //     Input (Data, Variable, Relative)
+    ]
+
+    /// A separate top-level collection after everything else, so the bytes
+    /// before it — what every existing map is — stay an untouched prefix.
+    /// Every global item it relies on is set here, not inherited.
+    private static let absolutePointerBlock: [UInt8] = [
+        0x05, 0x01,       // Usage Page (Generic Desktop)
+        0x09, 0x02,       // Usage (Mouse)
+        0xA1, 0x01,       // Collection (Application)
+        0x85, 0x04,       //   Report ID (4)
+        0x09, 0x01,       //   Usage (Pointer)
+        0xA1, 0x00,       //   Collection (Physical)
+        // Buttons 1-3
+        0x05, 0x09,       //     Usage Page (Buttons)
+        0x19, 0x01,       //     Usage Minimum (Button 1)
+        0x29, 0x03,       //     Usage Maximum (Button 3)
+        0x15, 0x00,       //     Logical Minimum (0)
+        0x25, 0x01,       //     Logical Maximum (1)
+        0x95, 0x03,       //     Report Count (3)
+        0x75, 0x01,       //     Report Size (1)
+        0x81, 0x02,       //     Input (Data, Variable, Absolute)
+        // Padding (5 bits)
+        0x95, 0x01,       //     Report Count (1)
+        0x75, 0x05,       //     Report Size (5)
+        0x81, 0x01,       //     Input (Constant)
+        // X, Y (absolute, 0..32767)
+        0x05, 0x01,       //     Usage Page (Generic Desktop)
+        0x09, 0x30,       //     Usage (X)
+        0x09, 0x31,       //     Usage (Y)
+        0x15, 0x00,       //     Logical Minimum (0)
+        0x26, 0xFF, 0x7F, //     Logical Maximum (32767)
+        0x35, 0x00,       //     Physical Minimum (0)
+        0x46, 0xFF, 0x7F, //     Physical Maximum (32767)
+        0x65, 0x00,       //     Unit (None)
+        0x55, 0x00,       //     Unit Exponent (0)
+        0x75, 0x10,       //     Report Size (16)
+        0x95, 0x02,       //     Report Count (2)
+        0x81, 0x02,       //     Input (Data, Variable, Absolute)
+        // Wheel (relative, -127..127)
+        0x09, 0x38,       //     Usage (Wheel)
+        0x15, 0x81,       //     Logical Minimum (-127)
+        0x25, 0x7F,       //     Logical Maximum (127)
+        0x35, 0x00,       //     Physical Minimum (0)
+        0x45, 0x00,       //     Physical Maximum (0)
+        0x75, 0x08,       //     Report Size (8)
+        0x95, 0x01,       //     Report Count (1)
+        0x81, 0x06,       //     Input (Data, Variable, Relative)
+        0xC0,             //   End Collection
+        0xC0,             // End Collection
     ]
 
     private static let descriptorEnd: [UInt8] = [

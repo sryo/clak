@@ -24,11 +24,18 @@ final class KeyboardLayoutMapper {
     }
 
     @objc private func inputSourceChanged(_ notification: Notification) {
-        rebuildMap()
+        if Thread.isMainThread {
+            rebuildMap()
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.rebuildMap() }
+        }
     }
 
     /// Rebuild the character map from the active keyboard input source.
+    /// Main thread only: Text Input Sources aren't thread-safe, and charMap
+    /// is read there without a lock.
     func rebuildMap() {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard let inputSource = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
               let layoutDataRef = TISGetInputSourceProperty(inputSource, kTISPropertyUnicodeKeyLayoutData) else {
             Log.keyboard.warning("KeyboardLayoutMapper: Could not get keyboard layout data")
@@ -97,7 +104,7 @@ final class KeyboardLayoutMapper {
         }
 
         charMap = newMap
-        Log.keyboard.info("KeyboardLayoutMapper: Rebuilt map for '\(sourceID)' — \(newMap.count) entries")
+        Log.keyboard.info("KeyboardLayoutMapper: Rebuilt map for '\(sourceID, privacy: .public)' — \(newMap.count) entries")
     }
 
     /// Look up the HID keycode and modifier byte for a character.
@@ -119,6 +126,27 @@ final class KeyboardLayoutMapper {
 
         // Fall back to static US map
         return KeyCodeTranslator.hidKeycode(for: character)
+    }
+
+    /// The keystrokes that type `text`, resolved against the live layout.
+    /// Main thread only (see rebuildMap); resolve here, then pace the sends
+    /// from any queue.
+    func keystrokes(for text: String) -> [CharacterComposer.Keystroke] {
+        dispatchPrecondition(condition: .onQueue(.main))
+        return Self.keystrokes(for: text, mapper: hidKeycode(for:))
+    }
+
+    /// One keystroke per character `mapper` can produce, in order. Characters
+    /// it can't produce are skipped.
+    static func keystrokes(for text: String,
+                           mapper: (Character) -> (keyCode: UInt8, modifiers: UInt8)?) -> [CharacterComposer.Keystroke] {
+        text.compactMap { character in
+            guard let mapping = mapper(character) else {
+                Log.hid.debug("No HID mapping for character: \(String(character), privacy: .private)")
+                return nil
+            }
+            return CharacterComposer.Keystroke(keyCode: mapping.keyCode, modifiers: mapping.modifiers)
+        }
     }
 
     /// Convert modifier combo index to HID modifier byte.

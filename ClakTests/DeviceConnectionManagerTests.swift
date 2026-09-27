@@ -38,4 +38,35 @@ final class DeviceConnectionManagerTests: XCTestCase {
         manager.removeAllDevices()
         XCTAssertTrue(manager.allDevices.isEmpty)
     }
+
+    // MARK: - Deterministic ordering
+
+    func testPrimaryIsMostRecentlyConnected() {
+        let manager = DeviceConnectionManager()
+        for id in ["A", "B", "C", "D", "E", "F", "G", "H"] {
+            manager.addConnectedDevice(ConnectedDevice(id: id, name: id))
+            XCTAssertEqual(manager.primaryDevice?.id, id)
+        }
+        XCTAssertEqual(manager.allDevices.map(\.id), ["H", "G", "F", "E", "D", "C", "B", "A"])
+    }
+
+    func testRemovingPrimaryFallsBackToPreviousConnection() {
+        let manager = DeviceConnectionManager()
+        manager.addConnectedDevice(ConnectedDevice(id: "A", name: "a"))
+        manager.addConnectedDevice(ConnectedDevice(id: "B", name: "b"))
+        manager.addConnectedDevice(ConnectedDevice(id: "C", name: "c"))
+        manager.removeDevice(id: "C")
+        XCTAssertEqual(manager.primaryDevice?.id, "B")
+        manager.removeDevice(id: "A")
+        XCTAssertEqual(manager.primaryDevice?.id, "B")
+    }
+
+    func testReconnectingMovesDeviceToFront() {
+        let manager = DeviceConnectionManager()
+        manager.addConnectedDevice(ConnectedDevice(id: "A", name: "a"))
+        manager.addConnectedDevice(ConnectedDevice(id: "B", name: "b"))
+        manager.addConnectedDevice(ConnectedDevice(id: "A", name: "a2"))
+        XCTAssertEqual(manager.allDevices.map(\.id), ["A", "B"])
+        XCTAssertEqual(manager.primaryDevice?.name, "a2")
+    }
 }

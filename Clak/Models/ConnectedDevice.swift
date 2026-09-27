@@ -1,14 +1,13 @@
 import Foundation
 import IOBluetooth
-import CoreBluetooth
 
 struct ConnectedDevice: Identifiable, Hashable {
     let id: String // BLE central UUID
     let name: String
 
-    init(central: CBCentral) {
-        self.id = central.identifier.uuidString
-        self.name = Self.resolveDeviceName(for: id)
+    init(central: HIDCentral) {
+        self.id = central.id.uuidString
+        self.name = central.name ?? Self.resolveDeviceName(for: id)
     }
 
     init(id: String, name: String) {

@@ -22,17 +22,34 @@ final class BluetoothManager: NSObject, BLEHIDPeripheralDelegate {
     }
 
     private(set) var connectionState: ConnectionState = .poweredOff {
-        didSet { notifyStateChange() }
+        didSet {
+            if case .error = connectionState {} else { lastFailure = nil }
+            notifyStateChange()
+        }
     }
     private(set) var connectedDevices: [ConnectedDevice] = []
     private(set) var capsLockActive: Bool = false
+    /// The failure behind the current .error state, if any.
+    private(set) var lastFailure: BLEHIDPeripheralManager.Failure?
+    /// A host is mid-pairing: the Mac shows the Numeric Comparison dialog.
+    private(set) var isAwaitingPairingConfirmation = false {
+        didSet {
+            if oldValue != isAwaitingPairingConfirmation {
+                onPairingStateChange?(isAwaitingPairingConfirmation)
+            }
+        }
+    }
 
     /// Called on every connectionState change. AppDelegate wires this to update AppState + MenuBar.
     var onStateChange: ((ConnectionState) -> Void)?
     /// Called when LED state (e.g. Caps Lock) changes from the connected device.
     var onLEDStateChange: ((Bool) -> Void)?
+    /// Called when isAwaitingPairingConfirmation changes.
+    var onPairingStateChange: ((Bool) -> Void)?
 
-    private let blePeripheral = BLEHIDPeripheralManager()
+    private let blePeripheral: HIDPeripheralLink
+    private let scheduler: DelayScheduler
+    private let keystrokeResolver: (String) -> [CharacterComposer.Keystroke]
     private let deviceManager = DeviceConnectionManager()
     // Serial queue so overlapping paste/AppleScript sends don't interleave keystrokes
     private let textSendQueue = DispatchQueue(label: "com.clak.app.textsend", qos: .userInitiated)
@@ -41,7 +58,50 @@ final class BluetoothManager: NSObject, BLEHIDPeripheralDelegate {
         onStateChange?(connectionState)
     }
 
-    override init() {
+    /// Transient failures retry on this curve; a connect resets it.
+    private var retryBackoff = RetryBackoff()
+    private var retryWorkItem: DispatchWorkItem?
+    private var readvertiseWorkItem: DispatchWorkItem?
+    private var wakeWindowWorkItem: DispatchWorkItem?
+
+    /// How long to advertise after wake while a pre-sleep link still looks
+    /// alive: long enough for a host that really dropped to reconnect.
+    static let wakeAdvertisingWindow: TimeInterval = 30
+
+    /// A bonded host reads before it subscribes (measured ~1.1 s); only a
+    /// central still unsubscribed after this is treated as pairing.
+    static let pairingPromptGrace: TimeInterval = 1.5
+    /// SMP gives up after about 30 s without confirmation.
+    static let pairingConfirmationTimeout: TimeInterval = 30
+    private var pairingWorkItems: [DispatchWorkItem] = []
+
+    /// What the connection state says about the radio, or nil when it says
+    /// nothing new: the launch state and transient failures keep the last
+    /// known availability, so "Bluetooth is off" never flashes at launch.
+    static func availability(for state: ConnectionState,
+                             failure: BLEHIDPeripheralManager.Failure?) -> BluetoothAvailability? {
+        switch state {
+        case .advertising, .connected:
+            return .on
+        case .poweredOff:
+            return nil
+        case .error:
+            switch failure {
+            case .poweredOff: return .off
+            case .unauthorized: return .unauthorized
+            case .unsupported: return .unsupported
+            default: return nil
+            }
+        }
+    }
+
+    init(link: HIDPeripheralLink? = nil,
+         scheduler: DelayScheduler = .main,
+         keystrokeResolver: ((String) -> [CharacterComposer.Keystroke])? = nil) {
+        self.blePeripheral = link ?? BLEHIDPeripheralManager(batteryLevelSource: MacBatteryMonitor(),
+                                                             requestsLowLatency: true)
+        self.scheduler = scheduler
+        self.keystrokeResolver = keystrokeResolver ?? { KeyboardLayoutMapper.shared.keystrokes(for: $0) }
         super.init()
         blePeripheral.delegate = self
     }
@@ -61,18 +121,56 @@ final class BluetoothManager: NSObject, BLEHIDPeripheralDelegate {
         Log.bluetooth.info("BLE torn down completely")
     }
 
-    /// Cycle advertising. A BLE peripheral cannot force-disconnect a central,
+    /// Menu "Reconnect". A BLE peripheral cannot force-disconnect a central,
     /// so devices that are still subscribed stay connected and stay listed —
     /// clearing them here would freeze the UI on "Searching…" while the phone
-    /// still shows a live keyboard. This only restarts discovery for new hosts.
+    /// still shows a live keyboard. With a central present, only discovery is
+    /// restarted. With none, the GATT database is rebuilt as well: a host
+    /// whose cached copy of our services is stale ignores a plain re-advertise.
     func disconnectAndReAdvertise() {
+        readvertiseWorkItem?.cancel()
+        readvertiseWorkItem = nil
+
+        guard blePeripheral.hasCentral else {
+            Log.bluetooth.info("Reconnect: no central — republishing")
+            blePeripheral.republish()
+            return
+        }
+
         blePeripheral.stopAdvertisingOnly()
         Log.bluetooth.info("Cycling advertising")
-
-        // Brief pause then resume
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        let resume = DispatchWorkItem { [weak self] in
+            self?.readvertiseWorkItem = nil
             self?.blePeripheral.startAdvertising()
         }
+        readvertiseWorkItem = resume
+        scheduler.schedule(0.5, resume)
+    }
+
+    /// After sleep: whatever was held is released by the caller; here the
+    /// link is checked. A link that died in sleep often sends no unsubscribe,
+    /// so even one that still looks alive advertises for a bounded window.
+    func handleWake() {
+        guard blePeripheral.isConnected else {
+            Log.bluetooth.info("Wake: not connected — advertising")
+            startAdvertising()
+            return
+        }
+
+        Log.bluetooth.info("Wake: link claims connected — advertising for \(Self.wakeAdvertisingWindow, privacy: .public)s")
+        wakeWindowWorkItem?.cancel()
+        blePeripheral.startAdvertising()
+        let close = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.wakeWindowWorkItem = nil
+            // Still connected: the old link was real, stop inviting others.
+            // Otherwise the disconnect path owns advertising.
+            if self.blePeripheral.isConnected {
+                self.blePeripheral.stopAdvertisingOnly()
+            }
+        }
+        wakeWindowWorkItem = close
+        scheduler.schedule(Self.wakeAdvertisingWindow, close)
     }
 
     // MARK: - Send HID Reports
@@ -104,34 +202,46 @@ final class BluetoothManager: NSObject, BLEHIDPeripheralDelegate {
 
     /// Send a mouse report (relative deltas, button bitmask, wheel).
     func sendMouse(buttons: UInt8 = 0, dx: Int8 = 0, dy: Int8 = 0, wheel: Int8 = 0) {
-        blePeripheral.sendMouseReport(buttons: buttons, dx: dx, dy: dy, wheel: wheel)
+        blePeripheral.sendMouseReport(buttons: buttons, dx: dx, dy: dy, wheel: wheel, pan: 0)
     }
 
+    /// Call on the main thread: the layout map is resolved here, before the
+    /// paced sends move to the text queue.
     func sendText(_ text: String) {
         let delay = Constants.AutoConnect.pasteKeystrokeDelay
+        let strokes = keystrokeResolver(text)
 
         textSendQueue.async { [weak self] in
             guard let self else {
                 return
             }
 
-            for character in text {
-                guard let mapping = KeyboardLayoutMapper.shared.hidKeycode(for: character) else {
-                    Log.hid.debug("No HID mapping for character: \(character)")
-                    continue
-                }
-
+            for mapping in strokes {
                 // BLE state (peripheral + pending FIFO) lives on the main queue;
                 // only the inter-keystroke sleeps stay on this background queue
-                DispatchQueue.main.sync {
-                    self.sendKeyboardReport(modifiers: mapping.modifiers, keyCodes: [mapping.keyCode])
-                }
+                self.sendPaced { $0.sendKeyboardReport(modifiers: mapping.modifiers, keyCodes: [mapping.keyCode]) }
                 Thread.sleep(forTimeInterval: delay / 2)
-                DispatchQueue.main.sync {
-                    self.sendKeyUp()
-                }
+                self.sendPaced { $0.sendKeyRelease() }
                 Thread.sleep(forTimeInterval: delay)
             }
+        }
+    }
+
+    // Signalled from peripheralIsReadyToSend while a paste waits for room
+    private let notifyQueueRoom = DispatchSemaphore(value: 0)
+    private var pasteWaitingForRoom = false
+
+    /// Sends from the text queue, then waits while the report sits in the
+    /// pending FIFO, so a long paste never outruns the radio and overflows it.
+    /// The timeout keeps a stalled link from hanging the paste forever.
+    private func sendPaced(_ send: @escaping (HIDPeripheralLink) -> Bool) {
+        let mustWait = DispatchQueue.main.sync {
+            let sent = send(self.blePeripheral)
+            self.pasteWaitingForRoom = !sent && self.blePeripheral.isConnected
+            return self.pasteWaitingForRoom
+        }
+        if mustWait {
+            _ = notifyQueueRoom.wait(timeout: .now() + 1)
         }
     }
 
@@ -143,10 +253,13 @@ final class BluetoothManager: NSObject, BLEHIDPeripheralDelegate {
     }
 
     func peripheralDidStartAdvertising() {
-        // Don't overwrite .connected state — iPhone may subscribe before services finish
-        if case .connected = connectionState {
+        // The live link decides: a remembered device can outlive a radio
+        // reset that dropped it without an unsubscribe
+        if blePeripheral.isConnected, let primary = deviceManager.primaryDevice {
+            connectionState = .connected(primary)
             Log.bluetooth.info("BLE HID keyboard advertising (already connected)")
         } else {
+            clearDevices()
             connectionState = .advertising
             Log.bluetooth.info("BLE HID keyboard now advertising as 'Clak'")
         }
@@ -159,43 +272,108 @@ final class BluetoothManager: NSObject, BLEHIDPeripheralDelegate {
         }
     }
 
-    func peripheralDidConnect(central: CBCentral) {
+    func peripheralDidSeePendingCentral(_ central: HIDCentral) {
+        endPairingWait()
+        let show = DispatchWorkItem { [weak self] in
+            self?.isAwaitingPairingConfirmation = true
+        }
+        let expire = DispatchWorkItem { [weak self] in
+            self?.isAwaitingPairingConfirmation = false
+        }
+        pairingWorkItems = [show, expire]
+        scheduler.schedule(Self.pairingPromptGrace, show)
+        scheduler.schedule(Self.pairingPromptGrace + Self.pairingConfirmationTimeout, expire)
+    }
+
+    private func endPairingWait() {
+        pairingWorkItems.forEach { $0.cancel() }
+        pairingWorkItems = []
+        isAwaitingPairingConfirmation = false
+    }
+
+    func peripheralDidConnect(central: HIDCentral) {
+        endPairingWait()
+        cancelRetry()
+        retryBackoff.reset()
+        wakeWindowWorkItem?.cancel()
+        wakeWindowWorkItem = nil
+
         let connected = deviceManager.addConnectedDevice(ConnectedDevice(central: central))
         connectedDevices = deviceManager.allDevices
         connectionState = .connected(connected)
-        Log.bluetooth.info("BLE device connected: \(central.identifier.uuidString)")
+        Log.bluetooth.info("BLE device connected: \(central.id.uuidString)")
     }
 
-    func peripheralDidDisconnect(central: CBCentral) {
-        deviceManager.removeDevice(id: central.identifier.uuidString)
+    func peripheralDidDisconnect(central: HIDCentral) {
+        endPairingWait()
+        deviceManager.removeDevice(id: central.id.uuidString)
         connectedDevices = deviceManager.allDevices
 
-        if let primary = deviceManager.primaryDevice {
+        if blePeripheral.isConnected, let primary = deviceManager.primaryDevice {
             connectionState = .connected(primary)
         } else {
+            clearDevices()
             // Auto-reconnect: immediately resume advertising
             connectionState = .advertising
             Log.bluetooth.info("BLE device disconnected, resuming advertising")
-            blePeripheral.resumeAdvertising()
+            blePeripheral.startAdvertising()
         }
     }
 
     func peripheralDidFail(_ failure: BLEHIDPeripheralManager.Failure) {
-        connectionState = .error(failure.message)
         Log.bluetooth.error("BLE error: \(failure.message)")
 
         // Power-off and permission failures need user/system action, not a retry
         guard failure.isRetryable else {
+            cancelRetry()
+            endPairingWait()
+            clearDevices()
+            lastFailure = failure
+            connectionState = .error(failure.message)
             return
         }
 
-        // Auto-recovery: retry after 3s for transient errors
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+        // A failed re-advertise doesn't break a link that is carrying input
+        if blePeripheral.isConnected {
+            Log.bluetooth.info("BLE: \(failure.message) — link still live, not retrying")
+            return
+        }
+
+        lastFailure = failure
+        connectionState = .error(failure.message)
+        scheduleRetry()
+    }
+
+    /// One pending retry at a time; each unanswered failure waits longer.
+    private func scheduleRetry() {
+        cancelRetry()
+        let delay = retryBackoff.nextDelay()
+        let retry = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            if case .error = self.connectionState {
-                Log.bluetooth.info("BLE: Auto-recovery — retrying advertising")
-                self.startAdvertising()
-            }
+            self.retryWorkItem = nil
+            guard !self.blePeripheral.isConnected else { return }
+            Log.bluetooth.info("BLE: Auto-recovery — retrying advertising")
+            self.startAdvertising()
+        }
+        retryWorkItem = retry
+        Log.bluetooth.info("BLE: Retrying in \(delay, privacy: .public)s")
+        scheduler.schedule(delay, retry)
+    }
+
+    private func cancelRetry() {
+        retryWorkItem?.cancel()
+        retryWorkItem = nil
+    }
+
+    /// Nothing is connected: forget every device and the last host's LEDs.
+    private func clearDevices() {
+        deviceManager.removeAllDevices()
+        if !connectedDevices.isEmpty {
+            connectedDevices = []
+        }
+        if capsLockActive {
+            capsLockActive = false
+            onLEDStateChange?(false)
         }
     }
 
@@ -204,6 +382,13 @@ final class BluetoothManager: NSObject, BLEHIDPeripheralDelegate {
         if capsLockActive != newCapsLock {
             capsLockActive = newCapsLock
             onLEDStateChange?(capsLockActive)
+        }
+    }
+
+    func peripheralIsReadyToSend() {
+        if pasteWaitingForRoom {
+            pasteWaitingForRoom = false
+            notifyQueueRoom.signal()
         }
     }
 }

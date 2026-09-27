@@ -145,12 +145,24 @@ Some dead ends, so you don't repeat them:
 
 **Nobody tells you a host connected.** A peripheral gets no connect callback. The first sign of a host is a read, a write, or a subscription. Clak treats a subscription to an input report as "connected", stops advertising, and ignores centrals subscribed only to Service Changed, because they can't receive keys.
 
-**Notifications can back up.** `updateValue(_:for:onSubscribedCentrals:)` returns `false` when CoreBluetooth's transmit queue is full. Clak queues the report, up to 64 and dropping the oldest, and drains the queue when `peripheralManagerIsReady(toUpdateSubscribers:)` fires. A pending Service Changed goes first, and new reports wait behind queued ones so keys never arrive out of order.
+**Notifications can back up.** `updateValue(_:for:onSubscribedCentrals:)` returns `false` when CoreBluetooth's transmit queue is full. Clak queues the report and drains the queue when `peripheralManagerIsReady(toUpdateSubscribers:)` fires. A pending Service Changed goes first, and new reports wait behind queued ones so keys never arrive out of order.
+
+What the queue does when it grows matters more than it looks. Dropping the oldest report, which Clak used to do, can drop a key-up, and the host then auto-repeats that key forever. So nothing the host would act on is thrown away:
+
+- An identical repeat of the report before it is skipped.
+- Pointer motion with the same buttons is summed into the report before it, up to ±127 per axis, so a fast drag stops piling up lag.
+- A full queue (64) collapses to the newest report per characteristic. Keystrokes in the middle are lost, but the final state, every key-up included, always survives.
+
+Pastes on macOS wait for room in the queue rather than filling it.
+
+**Send a report as soon as a host subscribes.** Some hosts hold off using a report until its first notification arrives. Clak sends an all-zero report to the subscribing host only, since broadcasting it would release keys another host is holding.
+
+**Validate the whole write batch first.** `didReceiveWrite` can hand you several requests at once, and CoreBluetooth treats them as a unit: answer the first request once, with success or with the first error, and apply nothing if any request is bad.
 
 **What Clak skips from the spec.** iOS, iPadOS and macOS accept all of these gaps, but a stricter host might not:
 
 - **Boot Keyboard reports.** The HID service spec requires them (`2A22`/`2A32`) for keyboards. Clak has none, and Protocol Mode is recorded but reports always use Report protocol.
-- **Battery Service.** HOGP requires one. `180F` is on the blocklist in short form, and the early attempt failed for the static-value reason in section 2.
+- **Battery Service.** HOGP requires one. `180F` is on the blocklist in short form, and the early attempt failed for the static-value reason in section 2. Clak on macOS now publishes it in long form, last so no earlier handle moves, with a dynamic, notifying Battery Level answered from the Mac's battery (100 on a desktop). Clak Remote leaves it out: the phone's own GATT database already has one.
 - **Appearance.** The spec says a keyboard should advertise it (`0x03C1`). CoreBluetooth has no advertising key for it, and no way to set the GAP Appearance.
 - **Device Information.** The PnP ID uses a placeholder vendor ID, `0xFFFF`, with product ID `0x0100`. HID Information is `11 01 00 02`: HID 1.11, no country code, normally connectable, no remote wake.
 

@@ -163,7 +163,18 @@ final class TrackpadUIView: UIView {
             lastScrollTimestamp = timestamp
         }
         activeTouches.formUnion(touches)
+        pointAtScreenIfNeeded()
         apply(recognizer.touchesBegan(samples(touches), at: timestamp, interruptsMomentum: caughtFling))
+    }
+
+    /// Absolute pointing (experiment): one finger places the cursor where it
+    /// touches, instead of nudging it.
+    private func pointAtScreenIfNeeded() {
+        guard let controller, controller.isPointingAtScreen,
+              activeTouches.count == 1, let touch = activeTouches.first,
+              bounds.width > 0, bounds.height > 0 else { return }
+        let location = touch.location(in: self)
+        controller.pointAt(fractionX: location.x / bounds.width, fractionY: location.y / bounds.height)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -175,6 +186,7 @@ final class TrackpadUIView: UIView {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastMoveSend >= Constants.Trackpad.moveReportInterval else { return }
         lastMoveSend = now
+        pointAtScreenIfNeeded()
         flushPending()
     }
 
@@ -214,6 +226,8 @@ final class TrackpadUIView: UIView {
         guard let controller else { return }
         switch action {
         case .pointer(let dx, let dy):
+            // Absolute pointing already placed the cursor
+            guard !controller.isPointingAtScreen else { break }
             pointer.finger(moved: CGVector(dx: dx, dy: dy), over: timestamp - lastPointerTimestamp)
             lastPointerTimestamp = timestamp
 

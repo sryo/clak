@@ -59,4 +59,46 @@ final class HIDReportMapTests: XCTestCase {
         XCTAssertEqual(HIDReportMap(includeHorizontalScroll: false).mouseReportSize, 4)
         XCTAssertEqual(HIDReportMap(includeHorizontalScroll: true).mouseReportSize, 5)
     }
+
+    // MARK: - Absolute pointer (ClakRemote experiment)
+
+    private static let absolutePointerBlockHex =
+        "05 01 09 02 A1 01 85 04 09 01 A1 00 05 09 19 01 29 03 15 00 25 01 95 03 75 01 81 02 " +
+        "95 01 75 05 81 01 05 01 09 30 09 31 15 00 26 FF 7F 35 00 46 FF 7F 65 00 55 00 " +
+        "75 10 95 02 81 02 09 38 15 81 25 7F 35 00 45 00 75 08 95 01 81 06 C0 C0"
+
+    func testDefaultMapHasNoAbsolutePointer() {
+        let map = HIDReportMap(includeHorizontalScroll: false)
+        XCTAssertFalse(map.includeAbsolutePointer)
+        XCTAssertEqual(hex(map.descriptor), Self.pinnedDescriptorHex)
+    }
+
+    /// Every existing map stays an untouched prefix, with the block after it.
+    func testAbsolutePointerOnlyAppends() {
+        for pan in [false, true] {
+            for highRes in [false, true] {
+                let without = HIDReportMap(includeHorizontalScroll: pan, highResolutionScroll: highRes)
+                let with = HIDReportMap(includeHorizontalScroll: pan, highResolutionScroll: highRes,
+                                        includeAbsolutePointer: true)
+                XCTAssertEqual(Array(with.descriptor.prefix(without.descriptor.count)), without.descriptor)
+                XCTAssertEqual(hex(Array(with.descriptor.dropFirst(without.descriptor.count))),
+                               Self.absolutePointerBlockHex.replacingOccurrences(of: " ", with: ""))
+                XCTAssertEqual(with.mouseReportSize, without.mouseReportSize)
+            }
+        }
+    }
+
+    func testAbsolutePointerSize() {
+        XCTAssertEqual(HIDReportMap.absolutePointerReportSize, 6)
+        XCTAssertEqual(Self.absolutePointerBlockHex.split(separator: " ").count, 78)
+    }
+
+    func testFingerprintFollowsTheDescriptor() {
+        let plain = HIDReportMap(includeHorizontalScroll: true, highResolutionScroll: true)
+        let again = HIDReportMap(includeHorizontalScroll: true, highResolutionScroll: true)
+        let absolute = HIDReportMap(includeHorizontalScroll: true, highResolutionScroll: true,
+                                    includeAbsolutePointer: true)
+        XCTAssertEqual(plain.fingerprint, again.fingerprint)
+        XCTAssertNotEqual(plain.fingerprint, absolute.fingerprint)
+    }
 }

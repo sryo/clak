@@ -49,9 +49,16 @@ final class TrackpadNSView: NSView {
     weak var bluetoothManager: BluetoothManager?
 
     private var dragDistance: CGFloat = 0
-    private var pendingDelta = CGSize.zero
-    private var lastMoveSend: TimeInterval = 0
     private var trackingArea: NSTrackingArea?
+
+    private lazy var pointer = PadPointerSender(scheduler: MainQueueTickScheduler.shared) { [weak self] dx, dy in
+        self?.bluetoothManager?.sendMouse(dx: dx, dy: dy)
+        return true
+    }
+
+    private lazy var scroll = PadScrollSender(scheduler: MainQueueTickScheduler.shared) { [weak self] lines in
+        self?.bluetoothManager?.sendMouse(wheel: lines)
+    }
 
     // The HUD window is movable by background — without this, drags move the window
     override var mouseDownCanMoveWindow: Bool { false }
@@ -93,22 +100,19 @@ final class TrackpadNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         dragDistance = 0
-        pendingDelta = .zero
+        pointer.reset()
     }
 
     override func mouseDragged(with event: NSEvent) {
         dragDistance += abs(event.deltaX) + abs(event.deltaY)
-        pendingDelta.width += event.deltaX * Constants.Trackpad.sensitivity
-        pendingDelta.height += event.deltaY * Constants.Trackpad.sensitivity
-
-        let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastMoveSend >= Constants.Trackpad.moveReportInterval else { return }
-        lastMoveSend = now
-        flushPendingDelta()
+        pointer.move(
+            dx: Double(event.deltaX * Constants.Trackpad.sensitivity),
+            dy: Double(event.deltaY * Constants.Trackpad.sensitivity)
+        )
     }
 
     override func mouseUp(with event: NSEvent) {
-        flushPendingDelta()
+        pointer.flush()
         if dragDistance < Constants.Trackpad.tapThreshold {
             bluetoothManager?.sendMouse(buttons: 0x01)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
@@ -118,23 +122,20 @@ final class TrackpadNSView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        let wheel = Self.clamp(event.scrollingDeltaY)
-        if wheel != 0 {
-            bluetoothManager?.sendMouse(wheel: wheel)
+        scroll.scroll(
+            deltaY: Double(event.scrollingDeltaY),
+            isPrecise: event.hasPreciseScrollingDeltas,
+            phase: Self.scrollPhase(of: event)
+        )
+    }
+
+    private static func scrollPhase(of event: NSEvent) -> PadScrollAccumulator.Phase {
+        if !event.momentumPhase.isEmpty {
+            return .momentum
         }
-    }
-
-    private func flushPendingDelta() {
-        let dx = Self.clamp(pendingDelta.width)
-        let dy = Self.clamp(pendingDelta.height)
-        guard dx != 0 || dy != 0 else { return }
-        pendingDelta.width -= CGFloat(dx)
-        pendingDelta.height -= CGFloat(dy)
-        bluetoothManager?.sendMouse(dx: dx, dy: dy)
-    }
-
-    private static func clamp(_ value: CGFloat) -> Int8 {
-        guard value.isFinite else { return 0 }
-        return Int8(max(-127, min(127, value.rounded())))
+        if event.phase.contains(.began) || event.phase.contains(.mayBegin) {
+            return .began
+        }
+        return event.phase.isEmpty ? .other : .changed
     }
 }

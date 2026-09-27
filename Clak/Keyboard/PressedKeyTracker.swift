@@ -28,6 +28,15 @@ final class PressedKeyTracker {
         return usages
     }
 
+    /// Release a key only if its press was tracked.
+    /// - Returns: the remaining usages to send, or nil if the key wasn't held.
+    func release(keyCode: UInt16) -> [UInt8]? {
+        guard pressed.contains(where: { $0.keyCode == keyCode }) else {
+            return nil
+        }
+        return keyUp(keyCode: keyCode)
+    }
+
     /// Clear all pressed keys (focus loss, disconnect, forwarding toggled off).
     func reset() {
         pressed.removeAll()

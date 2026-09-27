@@ -5,6 +5,9 @@ import os
 
 /// Delegate protocol for receiving keyboard event notifications.
 ///
+/// Called on the capture's tap thread, not main: answer from state that is
+/// safe to read there and hand everything else to main.
+///
 /// Each method returns whether the event should be CONSUMED (swallowed system-wide).
 /// Consumption only takes effect when the tap was created as `.defaultTap`
 /// (requires Accessibility permission); listen-only taps ignore the return value.
@@ -18,9 +21,15 @@ protocol KeyboardEventCaptureDelegate: AnyObject {
     /// - Returns: true to consume the event.
     func keyboardCapture(_ capture: KeyboardEventCapture, didCaptureKeyUp keyCode: UInt16, modifiers: CGEventFlags) -> Bool
 
-    /// Called when modifier keys change state.
+    /// Called when modifier keys change state. `keyCode` is the modifier key
+    /// that changed.
     /// - Returns: true to consume the event.
-    func keyboardCapture(_ capture: KeyboardEventCapture, didCaptureModifierChange modifiers: CGEventFlags) -> Bool
+    func keyboardCapture(_ capture: KeyboardEventCapture, didCaptureModifierChange modifiers: CGEventFlags, keyCode: UInt16) -> Bool
+
+    /// The tap was disabled for a while, so events (key-ups included) were
+    /// lost. The iOS host autorepeats held keys, so anything still held on the
+    /// device must be released or it repeats forever.
+    func keyboardCaptureDidDropEvents(_ capture: KeyboardEventCapture)
 }
 
 // MARK: - KeyboardEventCapture
@@ -52,6 +61,14 @@ final class KeyboardEventCapture {
     /// Whether the tap can consume events (.defaultTap, requires Accessibility permission).
     private(set) var isConsumeCapable = false
 
+    /// The tap and its run loop source live on this thread; `eventTap` and
+    /// `runLoopSource` are only touched there.
+    private let tapThread: EventTapThread
+
+    init(tapThread: EventTapThread = .shared) {
+        self.tapThread = tapThread
+    }
+
     // MARK: - Permissions
 
     /// Whether the app currently has Input Monitoring (Accessibility) permission.
@@ -70,7 +87,7 @@ final class KeyboardEventCapture {
     /// Start capturing keyboard events.
     ///
     /// Creates a CGEventTap listening for key-down, key-up, and flags-changed events.
-    /// The tap is installed on the current run loop.
+    /// The tap is installed on the tap thread's run loop.
     ///
     /// - Returns: `true` if capture started successfully, `false` if the event tap
     ///   could not be created (e.g., missing permissions or already capturing).
@@ -85,6 +102,10 @@ final class KeyboardEventCapture {
             return false
         }
 
+        return tapThread.performAndWait { self.installTap() }
+    }
+
+    private func installTap() -> Bool {
         let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
             | (1 << CGEventType.flagsChanged.rawValue)
@@ -118,7 +139,7 @@ final class KeyboardEventCapture {
         }
 
         runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+        CFRunLoopAddSource(tapThread.runLoop, source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
 
         isCapturing = true
@@ -133,9 +154,12 @@ final class KeyboardEventCapture {
         guard isCapturing else {
             return
         }
+        tapThread.performAndWait { self.removeTap() }
+    }
 
+    private func removeTap() {
         if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+            CFRunLoopRemoveSource(tapThread.runLoop, source, .commonModes)
         }
 
         if let tap = eventTap {
@@ -158,52 +182,56 @@ final class KeyboardEventCapture {
 
     // MARK: - Event Tap Callback
 
-    /// The C-compatible callback function for the CGEventTap.
-    ///
-    /// This function recovers the `KeyboardEventCapture` instance from `userInfo`
-    /// and dispatches events to the delegate on the main thread.
-    private static let eventTapCallback: CGEventTapCallBack = { proxy, type, event, userInfo in
+    /// The C-compatible callback function for the CGEventTap. Recovers the
+    /// `KeyboardEventCapture` instance from `userInfo` and hands the event to it.
+    private static let eventTapCallback: CGEventTapCallBack = { _, type, event, userInfo in
         guard let userInfo = userInfo else {
             return Unmanaged.passUnretained(event)
         }
 
         let capture = Unmanaged<KeyboardEventCapture>.fromOpaque(userInfo).takeUnretainedValue()
-        var consume = false
+        // Returning nil consumes the event (only effective for .defaultTap)
+        return capture.handle(type: type, event: event) ? nil : Unmanaged.passUnretained(event)
+    }
 
+    /// Dispatches one tap event to the delegate.
+    /// - Returns: true when the event should be consumed.
+    @discardableResult
+    func handle(type: CGEventType, event: CGEvent) -> Bool {
         switch type {
         case .keyDown:
             let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
             let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
             let flags = event.flags
-            Log.keyboard.debug("Key down: keyCode=\(keyCode), flags=0x\(String(flags.rawValue, radix: 16))")
-            consume = capture.delegate?.keyboardCapture(
-                capture, didCaptureKeyDown: keyCode, modifiers: flags, isAutorepeat: isAutorepeat
+            Log.keyboard.debug("Key down: keyCode=\(keyCode, privacy: .private), flags=0x\(String(flags.rawValue, radix: 16), privacy: .private)")
+            return delegate?.keyboardCapture(
+                self, didCaptureKeyDown: keyCode, modifiers: flags, isAutorepeat: isAutorepeat
             ) ?? false
 
         case .keyUp:
             let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
             let flags = event.flags
-            Log.keyboard.debug("Key up: keyCode=\(keyCode), flags=0x\(String(flags.rawValue, radix: 16))")
-            consume = capture.delegate?.keyboardCapture(capture, didCaptureKeyUp: keyCode, modifiers: flags) ?? false
+            Log.keyboard.debug("Key up: keyCode=\(keyCode, privacy: .private), flags=0x\(String(flags.rawValue, radix: 16), privacy: .private)")
+            return delegate?.keyboardCapture(self, didCaptureKeyUp: keyCode, modifiers: flags) ?? false
 
         case .flagsChanged:
-            let flags = event.flags
-            consume = capture.delegate?.keyboardCapture(capture, didCaptureModifierChange: flags) ?? false
+            let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+            return delegate?.keyboardCapture(self, didCaptureModifierChange: event.flags, keyCode: keyCode) ?? false
 
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             // The system disabled our event tap (timeout or user input). Re-enable —
             // critical for a consuming tap, where a dead tap blocks system-wide typing.
+            // Whatever arrived while it was off is gone, key-ups included.
             Log.keyboard.warning("Event tap disabled, re-enabling")
-            if let tap = capture.eventTap {
+            if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
+            delegate?.keyboardCaptureDidDropEvents(self)
+            return false
 
         default:
-            break
+            return false
         }
-
-        // Returning nil consumes the event (only effective for .defaultTap)
-        return consume ? nil : Unmanaged.passUnretained(event)
     }
 
     // MARK: - Cleanup
