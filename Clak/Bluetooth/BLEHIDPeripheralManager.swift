@@ -208,10 +208,12 @@ final class BLEHIDPeripheralManager: NSObject {
     ///     is inert: there is no characteristic of ours to indicate on.
     init(localName: String = Constants.appName,
          includeHorizontalScroll: Bool = false,
+         highResolutionScroll: Bool = false,
          restoreIdentifier: String? = nil,
          publishesGenericAttributeService: Bool = true) {
         self.localName = localName
-        self.reportMap = HIDReportMap(includeHorizontalScroll: includeHorizontalScroll)
+        self.reportMap = HIDReportMap(includeHorizontalScroll: includeHorizontalScroll,
+                                      highResolutionScroll: highResolutionScroll)
         self.publishesGenericAttributeService = publishesGenericAttributeService
         super.init()
 

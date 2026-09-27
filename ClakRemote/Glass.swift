@@ -56,10 +56,12 @@ extension View {
 /// height or bar inset can't leave the two layers disagreeing.
 enum ControlMetrics {
     static let barInset: CGFloat = 16
+    /// Space under the bar, which sits just above the home indicator, clear of
+    /// the system's own swipe.
+    static let barBottom: CGFloat = 12
     // Landscape leaves a phone about 400pt of height for everything, so the
-    // compact variants below all buy that back: 44pt of dead space under the
-    // bar, or 66pt keys, are affordable in portrait and not here.
-    static func barBottom(compact: Bool) -> CGFloat { compact ? 12 : 44 }
+    // compact variants below buy that back: 66pt keys are affordable in
+    // portrait and not here.
     static let barRadius: CGFloat = 34
     static let surfaceRadius: CGFloat = 30
     static func keyHeight(compact: Bool) -> CGFloat {

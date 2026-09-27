@@ -14,6 +14,21 @@ struct HIDReportMap: Equatable {
     /// ClakRemote (iOS) opts in; Clak (macOS) keeps the original 4-byte report
     /// so existing bonds stay valid.
     let includeHorizontalScroll: Bool
+    /// Declares the wheel and pan's physical size, so the Mac counts
+    /// `highResolutionScrollCountsPerInch` of them per inch instead of
+    /// assuming 9, and each count is a small fraction of a line. ClakRemote
+    /// (iOS) opts in; Clak (macOS) keeps its original descriptor.
+    let highResolutionScroll: Bool
+
+    /// Apple's formula for a relative element's resolution: logical range
+    /// times ten to the minus unit exponent, over physical range. Here
+    /// 254 × 100 / 20.
+    static let highResolutionScrollCountsPerInch = 1270
+
+    init(includeHorizontalScroll: Bool, highResolutionScroll: Bool = false) {
+        self.includeHorizontalScroll = includeHorizontalScroll
+        self.highResolutionScroll = highResolutionScroll
+    }
 
     static let keyboardReportSize = 8
     static let consumerReportSize = 2
@@ -28,7 +43,10 @@ struct HIDReportMap: Equatable {
     /// to its ID.
     var descriptor: [UInt8] {
         Self.baseDescriptor
+            + (highResolutionScroll ? Self.scrollPhysicalSize : [])
+            + Self.wheelBlock
             + (includeHorizontalScroll ? Self.acPanBlock : [])
+            + (highResolutionScroll ? Self.scrollPhysicalReset : [])
             + Self.descriptorEnd
     }
 
@@ -118,6 +136,9 @@ struct HIDReportMap: Equatable {
         0x75, 0x08,       //     Report Size (8)
         0x95, 0x02,       //     Report Count (2)
         0x81, 0x06,       //     Input (Data, Variable, Relative)
+    ]
+
+    private static let wheelBlock: [UInt8] = [
         // Wheel (relative, -127..127)
         0x09, 0x38,       //     Usage (Wheel)
         0x15, 0x81,       //     Logical Minimum (-127)
@@ -125,6 +146,22 @@ struct HIDReportMap: Equatable {
         0x75, 0x08,       //     Report Size (8)
         0x95, 0x01,       //     Report Count (1)
         0x81, 0x06,       //     Input (Data, Variable, Relative)
+    ]
+
+    /// A physical size for the wheel and pan: 254 counts over 0.2 inch, so
+    /// 1270 per inch. Global items, so they apply to both and are reset after.
+    private static let scrollPhysicalSize: [UInt8] = [
+        0x35, 0xF6,       //     Physical Minimum (-10)
+        0x45, 0x0A,       //     Physical Maximum (10)
+        0x65, 0x13,       //     Unit (Inch)
+        0x55, 0x0E,       //     Unit Exponent (-2)
+    ]
+
+    private static let scrollPhysicalReset: [UInt8] = [
+        0x35, 0x00,       //     Physical Minimum (0)
+        0x45, 0x00,       //     Physical Maximum (0)
+        0x65, 0x00,       //     Unit (None)
+        0x55, 0x00,       //     Unit Exponent (0)
     ]
 
     /// Optional AC Pan block spliced into the mouse collection when

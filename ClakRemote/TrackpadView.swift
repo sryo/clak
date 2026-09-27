@@ -26,38 +26,35 @@ final class TrackpadUIView: UIView {
     private var deadlineWork: DispatchWorkItem?
 
     // Pointer
-    private var pendingDelta: CGSize = .zero
+    /// Finger movement in, mouse reports out, shaped so the Mac's pointer
+    /// moves as its Magic Trackpad would.
+    private var pointer = PointerAccelerator()
     private var lastMoveSend: TimeInterval = 0
     private var lastPointerTimestamp: TimeInterval = 0
 
-    // Scroll — accumulated in LINE units; whole ±1 ticks are sent because macOS
-    // multiplies multi-line wheel deltas into jumps (its accel curve is rate-based)
-    private var scrollAccX: CGFloat = 0
-    private var scrollAccY: CGFloat = 0
+    // Scroll: finger movement in, wheel ticks out, one axis each, shaped so
+    // the Mac scrolls as its trackpad would.
+    private var scrollX = ScrollAccelerator()
+    private var scrollY = ScrollAccelerator()
+    /// Touch movement paced out as one report per Bluetooth connection event.
+    private var pacerX = ScrollPacer()
+    private var pacerY = ScrollPacer()
     private var scrollVelocityX: CGFloat = 0 // pt/s, low-passed
     private var scrollVelocityY: CGFloat = 0
     private var lastScrollTimestamp: TimeInterval = 0
 
+    /// Sends scroll at 120 Hz while fingers scroll and while a fling runs.
+    private var scrollLink: CADisplayLink?
+    private var lastScrollTick: TimeInterval = 0
+
     // Momentum (fling) — ariya/kinetic-style exponential decay
-    private var momentumLink: CADisplayLink?
     private var momentumVX: CGFloat = 0
     private var momentumVY: CGFloat = 0
-    private var momentumAccX: CGFloat = 0
-    private var momentumAccY: CGFloat = 0
-    private var lastMomentumTimestamp: TimeInterval = 0
+    private var isFlinging: Bool { momentumVX != 0 || momentumVY != 0 }
 
     private let dragHaptic = UIImpactFeedbackGenerator(style: .medium)
     private let dropHaptic = UIImpactFeedbackGenerator(style: .light)
     private let gestureHaptic = UIImpactFeedbackGenerator(style: .rigid)
-    private static let pointsPerScrollLine: CGFloat = 10
-
-    // Velocity-based pointer acceleration: slow strokes get sub-1x gain for
-    // precision, fast flicks ramp toward maxGain so the cursor can cross the
-    // screen without repeated swipes.
-    private static let accelMinGain: CGFloat = 0.5
-    private static let accelMaxGain: CGFloat = 4.5
-    private static let accelMaxSpeed: CGFloat = 1400 // pts/sec where gain saturates
-    private static let accelExponent: CGFloat = 1.4
 
     // Momentum constants (τ from ariya/kinetic 325ms / iOS ~500ms; velocity
     // low-pass 0.8/0.2 per sample; fling only if the last sample is fresh)
@@ -68,7 +65,7 @@ final class TrackpadUIView: UIView {
     // keeps it stutter-free, and hands off cleanly when Clak's ScrollEnhancer
     // runs on the Mac: it sees the stream stop at meaningful velocity and
     // continues the slow part of the tail with pixel-smooth momentum events.
-    private static let momentumStopVelocity: CGFloat = 100 // pt/s = 10 ticks/s
+    private static let momentumStopVelocity: CGFloat = 100 // pt/s
     private static let flingMaxSampleAge: TimeInterval = 0.1
 
     override init(frame: CGRect) {
@@ -153,13 +150,13 @@ final class TrackpadUIView: UIView {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        let caughtFling = momentumLink != nil
+        let caughtFling = isFlinging
         cancelMomentum()
         let timestamp = touches.first?.timestamp ?? ProcessInfo.processInfo.systemUptime
         if activeTouches.isEmpty {
-            pendingDelta = .zero
-            scrollAccX = 0
-            scrollAccY = 0
+            pointer.reset()
+            scrollX.reset()
+            scrollY.reset()
             scrollVelocityX = 0
             scrollVelocityY = 0
             lastPointerTimestamp = timestamp
@@ -185,7 +182,7 @@ final class TrackpadUIView: UIView {
         activeTouches.subtract(touches)
         let timestamp = touches.first?.timestamp ?? ProcessInfo.processInfo.systemUptime
         if activeTouches.isEmpty {
-            flushPending()
+            flushPending(draining: true)
         }
         apply(recognizer.touchesEnded(touches.map(Self.id(of:)), at: timestamp), at: timestamp)
     }
@@ -195,9 +192,8 @@ final class TrackpadUIView: UIView {
         let timestamp = touches.first?.timestamp ?? ProcessInfo.processInfo.systemUptime
         apply(recognizer.touchesCancelled(touches.map(Self.id(of:)), at: timestamp))
         if activeTouches.isEmpty {
-            pendingDelta = .zero
-            scrollAccX = 0
-            scrollAccY = 0
+            pointer.reset()
+            cancelMomentum()
         }
     }
 
@@ -218,21 +214,16 @@ final class TrackpadUIView: UIView {
         guard let controller else { return }
         switch action {
         case .pointer(let dx, let dy):
-            let dt = max(timestamp - lastPointerTimestamp, 0.004)
+            pointer.finger(moved: CGVector(dx: dx, dy: dy), over: timestamp - lastPointerTimestamp)
             lastPointerTimestamp = timestamp
-            let speed = hypot(dx, dy) / CGFloat(dt)
-            let normalized = min(speed / Self.accelMaxSpeed, 1)
-            let gain = Self.accelMinGain
-                + (Self.accelMaxGain - Self.accelMinGain) * pow(normalized, Self.accelExponent)
-            pendingDelta.width += dx * Constants.Trackpad.sensitivity * gain
-            pendingDelta.height += dy * Constants.Trackpad.sensitivity * gain
 
         case .scroll(let dx, let dy):
             // Natural scrolling: fingers up = content moves up = wheel down
             let dt = max(timestamp - lastScrollTimestamp, 0.004)
             lastScrollTimestamp = timestamp
-            scrollAccX += -dx / Self.pointsPerScrollLine
-            scrollAccY += -dy / Self.pointsPerScrollLine
+            pacerX.finger(moved: -dx, over: dt)
+            pacerY.finger(moved: -dy, over: dt)
+            startScrollLink()
             scrollVelocityX = 0.8 * (-dx / CGFloat(dt)) + 0.2 * scrollVelocityX
             scrollVelocityY = 0.8 * (-dy / CGFloat(dt)) + 0.2 * scrollVelocityY
 
@@ -317,10 +308,12 @@ final class TrackpadUIView: UIView {
 
         momentumVX = scrollVelocityX.clamped(to: Self.flingMaxVelocity)
         momentumVY = scrollVelocityY.clamped(to: Self.flingMaxVelocity)
-        momentumAccX = 0
-        momentumAccY = 0
-        lastMomentumTimestamp = CACurrentMediaTime()
+        startScrollLink()
+    }
 
+    private func startScrollLink() {
+        guard scrollLink == nil else { return }
+        lastScrollTick = CACurrentMediaTime()
         // Weak proxy target: CADisplayLink retains its target, so a direct
         // `self` would keep a dead view alive and scrolling after removal.
         let proxy = DisplayLinkProxy()
@@ -329,78 +322,82 @@ final class TrackpadUIView: UIView {
                 link.invalidate()
                 return
             }
-            self.momentumTick(link)
+            self.scrollTick(link)
         }
         let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.tick(_:)))
+        // Ticks finer than touches, so sends can follow the link's own
+        // schedule (see ScrollPacer).
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
-        momentumLink = link
+        scrollLink = link
     }
 
-    private func momentumTick(_ link: CADisplayLink) {
+    private func scrollTick(_ link: CADisplayLink) {
         let now = link.timestamp
-        let dt = CGFloat(min(now - lastMomentumTimestamp, 0.1))
-        lastMomentumTimestamp = now
+        let dt = min(now - lastScrollTick, 0.1)
+        lastScrollTick = now
 
-        let decay = exp(-dt / Self.momentumTimeConstant)
-        momentumVX *= decay
-        momentumVY *= decay
-
-        momentumAccX += momentumVX * dt / Self.pointsPerScrollLine
-        momentumAccY += momentumVY * dt / Self.pointsPerScrollLine
-        let pan = Self.takeTick(&momentumAccX)
-        let wheel = Self.takeTick(&momentumAccY)
-        if wheel != 0 || pan != 0 {
-            controller?.mouseScroll(wheel: wheel, pan: pan)
+        if isFlinging {
+            // The fling keeps the fingers' last speed going, decaying,
+            // through the same shaping as the scroll itself.
+            let decay = exp(-CGFloat(dt) / Self.momentumTimeConstant)
+            momentumVX *= decay
+            momentumVY *= decay
+            pacerX.fling(speed: momentumVX, over: dt)
+            pacerY.fling(speed: momentumVY, over: dt)
+            if abs(momentumVX) < Self.momentumStopVelocity && abs(momentumVY) < Self.momentumStopVelocity {
+                momentumVX = 0
+                momentumVY = 0
+            }
         }
 
-        if abs(momentumVX) < Self.momentumStopVelocity && abs(momentumVY) < Self.momentumStopVelocity {
-            cancelMomentum()
+        let pan = pacerX.take(at: now)
+        let wheel = pacerY.take(at: now)
+        if pan != nil || wheel != nil {
+            let pans = scrollX.reports(forFingerMoved: pan ?? 0, over: ScrollPacer.interval)
+            let wheels = scrollY.reports(forFingerMoved: wheel ?? 0, over: ScrollPacer.interval)
+            for i in 0..<max(pans.count, wheels.count) {
+                sendScroll(pan: i < pans.count ? pans[i] : 0, wheel: i < wheels.count ? wheels[i] : 0)
+            }
         }
+
+        if !isFlinging, pacerX.isSettled, pacerY.isSettled {
+            stopScrollLink()
+        }
+    }
+
+    private func stopScrollLink() {
+        scrollLink?.invalidate()
+        scrollLink = nil
     }
 
     private func cancelMomentum() {
-        momentumLink?.invalidate()
-        momentumLink = nil
         momentumVX = 0
         momentumVY = 0
-        momentumAccX = 0
-        momentumAccY = 0
+        pacerX.reset()
+        pacerY.reset()
+        scrollX.reset()
+        scrollY.reset()
+        stopScrollLink()
     }
 
     // MARK: - Sending
 
-    private func flushPending() {
-        let dx = Self.clamp(pendingDelta.width)
-        let dy = Self.clamp(pendingDelta.height)
-        if dx != 0 || dy != 0 {
-            pendingDelta.width -= CGFloat(dx)
-            pendingDelta.height -= CGFloat(dy)
-            controller?.mouseMove(dx: dx, dy: dy)
+    /// One pointer report per call while moving; on lifting, whatever is
+    /// still owed goes out too, rather than waiting for a next touch. Scroll
+    /// goes out as each touch arrives instead (see ScrollAccelerator).
+    private func flushPending(draining: Bool = false) {
+        var reports = 0
+        while reports < (draining ? 4 : 1), let report = pointer.nextReport() {
+            controller?.mouseMove(dx: report.dx, dy: report.dy)
+            reports += 1
         }
+    }
 
-        let pan = Self.takeTick(&scrollAccX)
-        let wheel = Self.takeTick(&scrollAccY)
+    private func sendScroll(pan: Int, wheel: Int) {
         if wheel != 0 || pan != 0 {
-            controller?.mouseScroll(wheel: wheel, pan: pan)
+            controller?.mouseScroll(wheel: Int8(wheel), pan: Int8(pan))
         }
-    }
-
-    /// Pop at most one whole ±1 line tick, capping the leftover backlog so a
-    /// fast drag doesn't keep scrolling long after the gesture.
-    private static func takeTick(_ accumulator: inout CGFloat) -> Int8 {
-        if accumulator >= 1 {
-            accumulator = min(accumulator - 1, 2)
-            return 1
-        }
-        if accumulator <= -1 {
-            accumulator = max(accumulator + 1, -2)
-            return -1
-        }
-        return 0
-    }
-
-    private static func clamp(_ value: CGFloat) -> Int8 {
-        Int8(max(-127, min(127, value.rounded())))
     }
 }
 

@@ -127,6 +127,7 @@ final class RemoteController {
     private let peripheral = BLEHIDPeripheralManager(
         localName: "Clak Remote",
         includeHorizontalScroll: true,
+        highResolutionScroll: true,
         restoreIdentifier: "com.clak.remote.peripheral",
         publishesGenericAttributeService: false
     )

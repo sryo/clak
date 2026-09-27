@@ -67,7 +67,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, ControlMetrics.barInset)
         .padding(.top, 10)
-        .padding(.bottom, keyboardFocus.isVisible ? 8 : ControlMetrics.barBottom(compact: isCompact))
+        .padding(.bottom, keyboardFocus.isVisible ? 8 : ControlMetrics.barBottom)
         .background(Color.black)
         .dialOverlay()
         .preferredColorScheme(.dark)
