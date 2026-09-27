@@ -97,11 +97,16 @@ struct KeyPress: ButtonStyle {
     var tint: AnyShapeStyle?
     @Environment(\.isEnabled) private var isEnabled
 
+    /// Shared with keys that aren't buttons, so every key presses alike.
+    static let pressedOpacity: Double = 0.45
+    static let pressedScale: CGFloat = 0.92
+    static let animation = Animation.spring(response: 0.22, dampingFraction: 0.7)
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(tint ?? AnyShapeStyle(.primary))
-            .opacity(isEnabled ? (configuration.isPressed ? 0.45 : 1) : 0.3)
-            .scaleEffect(configuration.isPressed ? 0.92 : 1)
-            .animation(.spring(response: 0.22, dampingFraction: 0.7), value: configuration.isPressed)
+            .opacity(isEnabled ? (configuration.isPressed ? Self.pressedOpacity : 1) : 0.3)
+            .scaleEffect(configuration.isPressed ? Self.pressedScale : 1)
+            .animation(Self.animation, value: configuration.isPressed)
     }
 }

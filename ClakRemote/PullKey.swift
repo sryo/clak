@@ -65,6 +65,11 @@ struct PullKey<Label: View>: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
         }
+            // Pressed like any other key while the finger is down on it: a
+            // gesture, not a button, so KeyPress can't do it.
+            .opacity(isPressed ? KeyPress.pressedOpacity : 1)
+            .scaleEffect(isPressed ? KeyPress.pressedScale : 1)
+            .animation(KeyPress.animation, value: isPressed)
             // The key is the dial's hub while it turns, and the delta is read
             // over it, so its own icon steps aside.
             .opacity(reading == nil ? 1 : 0)
@@ -90,6 +95,8 @@ struct PullKey<Label: View>: View {
             }
             .accessibilityAction { onTap?() }
     }
+
+    private var isPressed: Bool { isDragging && reading == nil }
 
     /// Shown once the finger is out of the dead middle, where there is a dial
     /// to see.
