@@ -62,14 +62,6 @@ struct PullStepper {
     /// while the finger goes round: the start of the ring's scale.
     var startAngle: CGFloat? { angle.map { $0 - turned } }
 
-    /// The value as whole steps and quarters, signed: +3¼, -½, 0.
-    static func readout(quarters: Int) -> String {
-        guard quarters != 0 else { return "0" }
-        let whole = abs(quarters) / 4
-        let fraction = ["", "¼", "½", "¾"][abs(quarters) % 4]
-        return (quarters > 0 ? "+" : "-") + (whole == 0 ? "" : "\(whole)") + fraction
-    }
-
     /// Feeds the finger's translation from where it landed. Returns the steps
     /// this movement crossed, in the order to send them.
     mutating func move(to translation: CGSize) -> [Step] {

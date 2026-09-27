@@ -69,7 +69,7 @@ struct ControlBar: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .glassPanel(cornerRadius: ControlMetrics.barRadius)
+        .glassPanel(in: RoundedRectangle(cornerRadius: ControlMetrics.barRadius), interactive: true)
         .glassGroup()
         .animation(panelSpring, value: isTyping)
         .onChange(of: coach.current) { _, hint in
@@ -316,7 +316,9 @@ struct ControlBar: View {
             key("backward.fill", "Previous", size: 28) { controller.tapConsumer(ConsumerUsage.previous) }
 
             // Tap plays or pauses; turned, it becomes the scrubber.
-            PullKey(allowsFine: false, twist: .degrees(pullTwist)) { step, _ in
+            PullKey(allowsFine: false,
+                    symbols: DialSymbols(rest: "playpause.fill", up: "forward.fill", down: "backward.fill"),
+                    twist: .degrees(pullTwist)) { step, _ in
                 coach.markDiscovered(.pullKey)
                 controller.seek(step)
             } onTap: {
@@ -332,7 +334,8 @@ struct ControlBar: View {
 
             separator
 
-            PullKey(twist: .degrees(pullTwist)) { step, fine in
+            PullKey(symbols: DialSymbols(rest: "sun.max", up: "sun.max", down: "sun.min"),
+                    twist: .degrees(pullTwist)) { step, fine in
                 coach.markDiscovered(.pullKey)
                 controller.tapConsumer(step > 0 ? ConsumerUsage.brightnessUp : ConsumerUsage.brightnessDown, fine: fine)
             } onEnd: {
@@ -343,7 +346,8 @@ struct ControlBar: View {
             .accessibilityLabel("Brightness")
             .accessibilityHint("Drag round the key to change")
 
-            PullKey(twist: .degrees(pullTwist)) { step, fine in
+            PullKey(symbols: DialSymbols(rest: "speaker.wave.2", up: "speaker.wave.3", down: "speaker.wave.1"),
+                    twist: .degrees(pullTwist)) { step, fine in
                 coach.markDiscovered(.pullKey)
                 controller.tapConsumer(step > 0 ? ConsumerUsage.volumeUp : ConsumerUsage.volumeDown, fine: fine)
             } onTap: {

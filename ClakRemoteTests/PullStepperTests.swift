@@ -233,14 +233,12 @@ final class PullStepperTests: XCTestCase {
         XCTAssertEqual(drag.emitted, Array(repeating: up, count: 8))
     }
 
-    func testTheReadoutCountsWholeStepsAndQuarters() {
-        let cases: [(Int, String)] = [
-            (0, "0"), (4, "+1"), (13, "+3¼"), (2, "+½"), (3, "+¾"),
-            (-1, "-¼"), (-10, "-2½"), (-64, "-16"),
-        ]
-        for (quarters, text) in cases {
-            XCTAssertEqual(PullStepper.readout(quarters: quarters), text, "\(quarters)")
-        }
+    func testTheHubShowsWhichWayTheValueWent() {
+        let symbols = DialSymbols(rest: "r", up: "u", down: "d")
+        XCTAssertEqual(symbols.symbol(forQuarters: 0), "r")
+        XCTAssertEqual(symbols.symbol(forQuarters: 1), "u")
+        XCTAssertEqual(symbols.symbol(forQuarters: 64), "u")
+        XCTAssertEqual(symbols.symbol(forQuarters: -3), "d")
     }
 
     // MARK: - What the ring shows
