@@ -26,10 +26,12 @@ extension View {
     }
 
     /// The same glass on any shape, for panels that aren't rectangles.
+    /// Interactive glass lights up under a touch; the fallback has no
+    /// equivalent and stays still.
     @ViewBuilder
-    func glassPanel<S: Shape>(in shape: S) -> some View {
+    func glassPanel<S: Shape>(in shape: S, interactive: Bool = false) -> some View {
         if #available(iOS 26, *) {
-            glassEffect(.regular, in: shape)
+            glassEffect(.regular.interactive(interactive), in: shape)
         } else {
             background(.ultraThinMaterial, in: shape)
                 .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 1))

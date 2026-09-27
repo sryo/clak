@@ -176,7 +176,7 @@ struct ContentView: View {
         .coordinateSpace(.named(Self.surfaceSpace))
         .frame(maxHeight: .infinity)
         .clipShape(surfaceShape)
-        .glassPanel(in: surfaceShape)
+        .glassPanel(in: surfaceShape, interactive: showsTrackpad)
     }
 
     private var isErrorStatus: Bool {
