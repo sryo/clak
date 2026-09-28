@@ -1,0 +1,60 @@
+{
+  "frames": 150,
+  "keyframeStep": 8,
+  "formats": ["avif", "webp"],
+  "filmEnd": 0.86,
+  "scrollMap": [
+    [0, 0],
+    [8.5, 14],
+    [11.5, 14],
+    [22, 35],
+    [25, 35],
+    [44, 65],
+    [61, 95],
+    [64, 95],
+    [79, 122],
+    [82, 122],
+    [97, 149],
+    [100, 149]
+  ],
+  "lock": [138, 149],
+  "letterFrame": 115,
+  "drawCaretLetter": false,
+  "galaxyClock": [
+    [100, 0],
+    [108, 0.7],
+    [110, 0.9],
+    [114, 1.75]
+  ],
+  "dust": {
+    "until": [30, 44],
+    "count": 46
+  },
+  "beam": {
+    "a": [170, -80],
+    "b": [1060, 980],
+    "w0": 170,
+    "w1": 460
+  },
+  "sets": {
+    "desktop": {
+      "width": 1600,
+      "height": 900,
+      "path": "frames/desktop/{format}/{index}.{format}",
+      "focus": [
+        [0, 0.5, 0.5]
+      ]
+    },
+    "mobile": {
+      "width": 1600,
+      "height": 900,
+      "path": "frames/desktop/{format}/{index}.{format}",
+      "note": "no portrait camera yet: desktop frames, cover-fit, the crop follows the subject in track.json",
+      "focus": "follow",
+      "focusFrom": [
+        [0, 0.36, 0.55],
+        [35, 0.36, 0.55]
+      ]
+    }
+  }
+}
