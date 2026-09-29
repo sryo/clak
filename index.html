@@ -1012,6 +1012,10 @@
       <div class="film__stage">
         <!-- Poster and no-script fallback: the first frame, or the locked last frame when motion is reduced. -->
         <picture class="film__poster">
+          <source media="(max-aspect-ratio: 4/5) and (prefers-reduced-motion: reduce)" type="image/avif" srcset="film/frames/mobile/avif/095.avif">
+          <source media="(max-aspect-ratio: 4/5) and (prefers-reduced-motion: reduce)" type="image/webp" srcset="film/frames/mobile/webp/095.webp">
+          <source media="(max-aspect-ratio: 4/5)" type="image/avif" srcset="film/frames/mobile/avif/000.avif">
+          <source media="(max-aspect-ratio: 4/5)" type="image/webp" srcset="film/frames/mobile/webp/000.webp">
           <source media="(prefers-reduced-motion: reduce)" type="image/avif" srcset="film/frames/desktop/avif/149.avif">
           <source media="(prefers-reduced-motion: reduce)" type="image/webp" srcset="film/frames/desktop/webp/149.webp">
           <source type="image/avif" srcset="film/frames/desktop/avif/000.avif">

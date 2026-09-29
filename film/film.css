@@ -40,8 +40,7 @@ html:not(.js) .film__stage { position: relative; }
 .film__poster, .film__frames, .film__fx {
   position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none;
 }
-.film__poster img { width: 100%; height: 100%; object-fit: cover; object-position: 36% 55%; display: block; }
-@media (min-aspect-ratio: 4/5) { .film__poster img { object-position: 50% 50%; } }
+.film__poster img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 50%; display: block; }
 /* The frame canvas is opaque black until its first draw; the poster shows until then. */
 .film__frames { opacity: 0; }
 .film.is-drawn .film__frames { opacity: 1; }
@@ -193,6 +192,10 @@ html:not(.js) .film__stage { position: relative; }
   .film__copy::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 26svh; background: linear-gradient(rgba(11, 11, 13, 0.75), rgba(11, 11, 13, 0)); }
   .film__cue { display: none; }
 }
+/* The rendered portrait set fills its top with the Mac window and leaves the void at the
+ * bottom, under the keyboard, so the copy goes back to the bottom there. */
+.film.has-portrait-set .film__line { top: auto; bottom: max(24px, 5svh); }
+.film.has-portrait-set .film__copy::after { content: none; }
 
 .film__tap { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .film__tap input { font-size: 16px; }
@@ -216,5 +219,7 @@ html:not(.js) .film__stage { position: relative; }
 .film.is-static .film__stage { position: relative; }
 .film.is-static .film__line { display: none; }
 .film.is-static .film__line--live { display: block; opacity: 1; bottom: auto; top: calc(48px + max(16px, 4svh)); }
+.film.is-static.has-portrait-set .film__line--live { top: auto; bottom: max(24px, 5svh); }
 .film.is-static .film__cue { display: none; }
 .film.is-static .film__caret { animation: none !important; }
+.film > .film__title { position: relative; left: auto; right: auto; bottom: auto; padding: 8px var(--film-edge) 56px; }

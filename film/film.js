@@ -464,7 +464,7 @@
     for (const b of bitmaps.values()) b.close?.();
     bitmaps.clear(); decoding.clear(); decodeQueue = []; blobs = [];
     plate?.close?.(); plate = null; plateFor = '';
-    drawnIndex = -1; drawnKey = ''; screensKey = '';
+    drawnIndex = -1; drawnKey = ''; screensKey = ''; screensOpacity = -1; track = null;
     const key = portrait.matches ? 'mobile' : 'desktop';
     N = meta.frames;
     set = { ...meta.sets[key] };
@@ -473,13 +473,23 @@
       // A rendered portrait set replaces the desktop crop when it's there.
       const [beats, tm] = await Promise.all([loadJSON('frames/mobile/beats.json'), loadJSON('frames/track_mobile.json')]);
       if (beats && Array.isArray(beats.story) && tm && Array.isArray(tm.frames)) {
-        set = { width: tm.width, height: tm.height, path: 'frames/mobile/{format}/{index}.{format}', focus: [[0, 0.5, 0.5]], story: beats.story };
+        set = {
+          width: tm.width, height: tm.height, path: 'frames/mobile/{format}/{index}.{format}', focus: [[0, 0.5, 0.5]], story: beats.story,
+          // The portrait camera's key light, in its frame pixels (read off mobile/png/000); meta.json can override it.
+          beam: (meta.sets.mobile && meta.sets.mobile.beam) || { a: [-100, 170], b: [850, 1030], w0: 150, w1: 260 },
+        };
         raw = resampleToStory(tm, N);
         imagesKey = 'mobile';
       }
     }
     if (!raw) raw = await loadJSON('frames/track.json');
     NI = set.story ? set.story.length : N;
+    hero.classList.toggle('has-portrait-set', imagesKey === 'mobile');
+    // Still portrait: the phone panel fills the bottom of the frame, so the title moves below it.
+    if (staticMode) {
+      const title = hero.querySelector('.film__title');
+      if (imagesKey === 'mobile') hero.appendChild(title); else hero.querySelector('.film__copy').prepend(title);
+    }
     capacity = Math.max(12, Math.floor(DECODED_BUDGET[key] / (set.width * set.height * 4)));
     stats.set = imagesKey === key ? key : `${key} (desktop crop)`;
     track = buildTrack(raw);
@@ -547,7 +557,7 @@
   }
 
   function drawDust(t, alpha) {
-    const { a, b, w0, w1 } = meta.beam;
+    const { a, b, w0, w1 } = set.beam || meta.beam;
     const ax = b[0] - a[0], ay = b[1] - a[1], len = Math.hypot(ax, ay);
     const nx = -ay / len, ny = ax / len;
     const warm = sprite.warm;
@@ -882,7 +892,7 @@
 
   let screensOpacity = -1;
   function setScreens(o) {
-    if (o === screensOpacity) return;
+    if (!track || o === screensOpacity) return;         // no track yet: nothing to show, nothing to cache
     screensOpacity = o;
     for (const [el] of liveScreens()) {
       el.style.opacity = o.toFixed(3);
