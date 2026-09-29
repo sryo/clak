@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<!-- App Store switch: Clak Remote's App Store links render but stay hidden while
-     data-appstore="off". Set it to "on" once the app is live on the store. -->
+<!-- App Store switch. While data-appstore="off", Clak Remote's links point at the public
+     TestFlight beta ([data-testflight]) and its App Store links stay hidden ([data-appstore]).
+     Set it to "on" once the app is live on the store: the App Store links replace the beta ones. -->
 <html lang="en" data-appstore="off">
 <head>
   <meta charset="UTF-8">
@@ -227,7 +228,8 @@
     }
 
     /* ---------- App Store switch (see the comment on <html>) ---------- */
-    html[data-appstore="off"] [data-appstore] { display: none !important; }
+    html[data-appstore="off"] [data-appstore],
+    html[data-appstore="on"] [data-testflight] { display: none !important; }
 
     .button {
       display: inline-flex;
@@ -910,16 +912,24 @@
     .section p { color: var(--text-2); margin-top: var(--s-2); }
     .section p strong { color: var(--text); font-weight: 600; }
 
-    pre {
+    .get { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
+    .get__card {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      padding: var(--s-3);
       background: var(--bg-2);
       border-radius: var(--radius-m);
-      padding: var(--s-2) var(--s-3);
-      overflow-x: auto;
-      font-family: var(--mono);
-      font-size: 0.875rem;
-      line-height: 1.7;
-      color: var(--text);
     }
+    .get__card h3 { font-size: var(--fs-1); font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
+    .section .get__card p { margin-top: var(--s-1); }
+    .get__card .button { margin-top: auto; }
+    .section .get__card h3 + p { margin-bottom: var(--s-3); }
+    .section .get__card .get__note { margin-top: var(--s-1); font-size: var(--fs--1); }
+    .section .get__dev { margin-top: var(--s-3); font-size: 0.875rem; }
+    .button--quiet { background: rgba(255, 255, 255, 0.14); color: #f5f5f7; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+    .button--quiet:hover { background: rgba(255, 255, 255, 0.22); }
+    @media (max-width: 600px) { .get { grid-template-columns: 1fr; } }
     code { font-family: var(--mono); font-size: 0.9em; }
 
     table.shortcuts { width: 100%; border-collapse: collapse; }
@@ -1039,12 +1049,10 @@
             <h1 id="title">Clak</h1>
             <p class="film__tagline">Your Mac and iPhone, each other's keyboard.</p>
             <div class="film__cta">
-              <a class="button" href="https://github.com/sryo/clak">
-                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-                View on GitHub
-              </a>
-              <a class="text-link" href="https://apps.apple.com/app/id6814379026" data-appstore>Clak Remote on the App Store</a>
-              <a class="text-link" href="#demo">Try it below</a>
+              <a class="button" href="https://github.com/sryo/clak/releases/latest/download/Clak.zip">Download for Mac</a>
+              <a class="button button--quiet" href="https://testflight.apple.com/join/1EqwmwfE" data-testflight>iPhone beta on TestFlight</a>
+              <a class="button button--quiet" href="https://apps.apple.com/app/id6814379026" data-appstore>iPhone app on the App Store</a>
+              <a class="text-link" href="https://github.com/sryo/clak">GitHub</a>
             </div>
           </div>
           <p class="film__line" data-in="6" data-out="11.5">It starts with a key.</p>
@@ -1274,19 +1282,24 @@
     </section>
 
     <div class="container">
-      <section class="section" aria-labelledby="install">
-        <h2 class="section__title" id="install">Build from source</h2>
-        <pre><code>git clone https://github.com/sryo/clak
-cd clak &amp;&amp; xcodegen generate
-open Clak.xcodeproj</code></pre>
-        <p>
-          Two targets: <strong>Clak</strong> for the Mac (macOS 14+) and <strong>Clak Remote</strong>
-          for the phone (iOS 17+). Clak needs Input Monitoring on first launch, then it starts
-          advertising on its own. Pair from the receiving device's Bluetooth settings.
-        </p>
-        <p data-appstore>
-          Just want the phone side? Get <a href="https://apps.apple.com/app/id6814379026">Clak Remote on the App Store</a>.
-        </p>
+      <section class="section" id="get" aria-labelledby="get-title">
+        <h2 class="section__title" id="get-title">Get Clak</h2>
+        <div class="get">
+          <div class="get__card">
+            <h3>Clak for Mac</h3>
+            <p>Your Mac's keyboard, typing on your iPhone, iPad, or Apple TV.</p>
+            <a class="button" href="https://github.com/sryo/clak/releases/latest/download/Clak.zip">Download for Mac</a>
+            <p class="get__note">macOS 14 or later</p>
+          </div>
+          <div class="get__card">
+            <h3>Clak Remote for iPhone</h3>
+            <p>Your iPhone, a keyboard and trackpad for your Mac.</p>
+            <a class="button" href="https://testflight.apple.com/join/1EqwmwfE" data-testflight>Join the beta on TestFlight</a>
+            <a class="button" href="https://apps.apple.com/app/id6814379026" data-appstore>Clak Remote on the App Store</a>
+            <p class="get__note">iOS 17 or later</p>
+          </div>
+        </div>
+        <p class="get__dev">Developers: <a href="https://github.com/sryo/clak#readme">Build from source</a>.</p>
       </section>
 
       <section class="section" aria-labelledby="shortcuts">
@@ -1359,7 +1372,7 @@ open Clak.xcodeproj</code></pre>
 
         <details>
           <summary>Is it free?</summary>
-          <p>Yes, free to use. The source is on <a href="https://github.com/sryo/clak">GitHub</a>.</p>
+          <p>Yes. <a href="#get">Download Clak</a> for the Mac, or join the Clak Remote beta for the iPhone. The source is on <a href="https://github.com/sryo/clak">GitHub</a>.</p>
         </details>
       </section>
     </div>
