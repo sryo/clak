@@ -277,10 +277,7 @@
       overflow: clip;
       color-scheme: dark;
       color: var(--text);
-      background:
-        radial-gradient(55% 45% at 50% 60%, rgba(40, 92, 190, 0.2), transparent 72%),
-        radial-gradient(40% 30% at 50% 100%, rgba(40, 92, 190, 0.12), transparent 80%),
-        #0b0b0d;
+      background: #0b0b0d;
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
       border-radius: var(--radius-l);
       padding: var(--s-4) var(--s-4) var(--s-2);
@@ -370,11 +367,12 @@
       transition: opacity 320ms cubic-bezier(0, 0, 0.2, 1) 200ms, visibility 0s;
     }
 
-    /* Floating panels: solid and dark, one fine light edge, depth from a soft blue glow. */
+    /* Floating panels: solid and dark, one fine light edge, depth from a neutral shadow.
+       Glow is reserved for events (a key press, a click), as in the film. */
     .slab {
       border-radius: 24px;
       background: #0f1219;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.5), 0 28px 80px rgba(10, 70, 180, 0.38);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.5), 0 24px 60px rgba(0, 0, 0, 0.6);
     }
 
     /* The Mac side, in native pixels. */
@@ -383,8 +381,8 @@
       position: absolute;
       overflow: hidden;
       background:
-        radial-gradient(85% 75% at 15% 110%, #1b5fd6 0%, rgba(27, 95, 214, 0) 62%),
-        radial-gradient(60% 55% at 96% -8%, #2c4588 0%, rgba(44, 69, 136, 0) 62%),
+        radial-gradient(85% 75% at 15% 110%, rgba(27, 95, 214, 0.5) 0%, rgba(27, 95, 214, 0) 62%),
+        radial-gradient(60% 55% at 96% -8%, rgba(44, 69, 136, 0.5) 0%, rgba(44, 69, 136, 0) 62%),
         linear-gradient(160deg, #121a2b 0%, #0d1528 55%, #0b1a3d 100%);
     }
 
@@ -461,7 +459,7 @@
       padding: 13px 15px 14px;
       border-radius: 20px;
       background: linear-gradient(180deg, #1a1e26 0%, #111318 100%);
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 22px 50px rgba(0, 0, 0, 0.55), 0 -10px 60px rgba(10, 70, 180, 0.2);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 22px 50px rgba(0, 0, 0, 0.55);
     }
     .krow { display: flex; gap: 5px; flex: 1 1 0; min-height: 0; }
     .krow--fn { flex-grow: 0.62; }
@@ -481,7 +479,7 @@
     .k.is-lit {
       background: #3492ec;
       color: #fff;
-      box-shadow: 0 0 20px rgba(52, 146, 236, 0.7);
+      box-shadow: 0 0 8px rgba(52, 146, 236, 0.55);
       transition: none;
     }
     .k--arrows { display: flex; flex-direction: column; gap: 3px; background: none; box-shadow: none; }
@@ -538,7 +536,7 @@
     .tile::before, .tile::after { content: ""; position: absolute; left: 14px; border-radius: 4px; }
     .tile::before { top: 14px; width: 18px; height: 18px; border-radius: 50%; background: rgba(255, 255, 255, 0.9); }
     .tile::after { bottom: 16px; width: 46px; height: 6px; background: rgba(255, 255, 255, 0.6); }
-    .tile.is-active { box-shadow: inset 0 0 0 2px #fff, 0 10px 30px rgba(10, 132, 255, 0.45); }
+    .tile.is-active { box-shadow: inset 0 0 0 2px #fff, 0 4px 12px rgba(10, 132, 255, 0.35); }
     .tile.is-bouncing { animation: tile-bounce 0.9s cubic-bezier(0.3, 0, 0.3, 1); }
     @keyframes tile-bounce {
       25% { transform: translateY(-20px); }
@@ -653,9 +651,7 @@
       height: 480px;
       border-radius: 30px;
       overflow: hidden;
-      background:
-        radial-gradient(90% 45% at 50% 108%, rgba(27, 95, 214, 0.35), rgba(27, 95, 214, 0) 70%),
-        linear-gradient(180deg, #131a2c 0%, #0d1121 100%);
+      background: linear-gradient(180deg, #131a2c 0%, #0d1121 100%);
       color: #fff;
       font-family: var(--font);
     }
