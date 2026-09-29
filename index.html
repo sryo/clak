@@ -249,9 +249,11 @@
     .text-link { font-size: var(--fs-0); font-weight: 500; }
 
     /* ---------- Demo stage: "Focus" ----------
-       The receiving device is the hero; the sending device is small, in front.
-       Both devices are laid out at a fixed native size and placed with one
-       translate + scale, so the mode swap is a single transform transition. */
+       The receiving surface is the hero; the sending one is small, in front.
+       Both are laid out at a fixed native size and placed with one translate + scale,
+       so the mode swap is a single transform transition. The stage speaks the film's
+       language in both page themes: the void, a blue ambient glow, glass panels floating
+       in it, and no device hardware except a generic keyboard. */
     .sr-only {
       position: absolute;
       width: 1px;
@@ -265,9 +267,21 @@
     }
 
     .stage {
+      /* Page tokens, re-pointed at the dark stage so the switch, hint and toggle follow. */
+      --bg: #0b0b0d;
+      --text: #f5f5f7;
+      --text-2: rgba(245, 245, 247, 0.62);
+      --hairline: rgba(255, 255, 255, 0.1);
+      --edge: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
       position: relative;
       overflow: clip;
-      background: var(--bg-2);
+      color-scheme: dark;
+      color: var(--text);
+      background:
+        radial-gradient(55% 45% at 50% 60%, rgba(40, 92, 190, 0.2), transparent 72%),
+        radial-gradient(40% 30% at 50% 100%, rgba(40, 92, 190, 0.12), transparent 80%),
+        #0b0b0d;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
       border-radius: var(--radius-l);
       padding: var(--s-4) var(--s-4) var(--s-2);
     }
@@ -276,7 +290,7 @@
       position: relative;
       display: flex;
       gap: 2px;
-      background: var(--bg);
+      background: rgba(255, 255, 255, 0.05);
       border: 1px solid var(--hairline);
       border-radius: 999px;
       padding: 3px;
@@ -334,7 +348,7 @@
       transform: translate(var(--x, 0), var(--y, 0)) scale(var(--s, 1));
       transition: transform 640ms cubic-bezier(0.32, 0.72, 0, 1);
     }
-    /* The device heading to the side leaves a beat later, so the hero reads as leading. */
+    /* The surface heading to the side leaves a beat later, so the hero reads as leading. */
     .scene[data-mode="type"] .mac,
     .scene[data-mode="remote"] .phone { transition-delay: 40ms; z-index: 2; }
     .scene.no-anim .dev,
@@ -348,7 +362,7 @@
       transition: opacity 200ms cubic-bezier(0.4, 0, 1, 1), visibility 0s linear 200ms;
     }
     .scene[data-mode="type"] .face--deck,
-    .scene[data-mode="type"] .face--notes,
+    .scene[data-mode="type"] .face--field,
     .scene[data-mode="remote"] .face--screen,
     .scene[data-mode="remote"] .face--remote {
       opacity: 1;
@@ -356,72 +370,50 @@
       transition: opacity 320ms cubic-bezier(0, 0, 0.2, 1) 200ms, visibility 0s;
     }
 
-    /* Shared macOS bits, in native Mac pixels. */
+    /* Floating panels: solid and dark, one fine light edge, depth from a soft blue glow. */
+    .slab {
+      border-radius: 24px;
+      background: #0f1219;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.5), 0 28px 80px rgba(10, 70, 180, 0.38);
+    }
+
+    /* The Mac side, in native pixels. */
     .mac { width: 720px; height: 450px; }
     .wall {
       position: absolute;
       overflow: hidden;
       background:
-        radial-gradient(120% 90% at 85% 110%, #c77b7a 0%, transparent 55%),
-        radial-gradient(90% 80% at 10% 0%, #2d4a7c 0%, transparent 60%),
-        linear-gradient(150deg, #243457 0%, #4b3f6e 55%, #8a5a74 100%);
+        radial-gradient(85% 75% at 15% 110%, #1b5fd6 0%, rgba(27, 95, 214, 0) 62%),
+        radial-gradient(60% 55% at 96% -8%, #2c4588 0%, rgba(44, 69, 136, 0) 62%),
+        linear-gradient(160deg, #121a2b 0%, #0d1528 55%, #0b1a3d 100%);
     }
-    .mbar {
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 0;
-      display: flex;
-      align-items: center;
-      gap: 18px;
-      background: rgba(0, 0, 0, 0.28);
-      color: rgba(255, 255, 255, 0.92);
-      font-family: var(--font);
-      white-space: nowrap;
-    }
-    .mbar b { font-weight: 700; }
-    .mbar__menus { display: flex; gap: 18px; font-weight: 400; }
-    .mbar__right { margin-left: auto; display: inline-flex; align-items: center; gap: 14px; }
-    .mbar svg { display: block; }
-    .clak-item { position: relative; display: inline-flex; color: #fff; transition: color 250ms ease; }
-    .clak-item__badge { position: absolute; right: -5px; bottom: -4px; opacity: 0; transition: opacity 250ms ease; }
-    .is-connected .clak-item { color: #0a84ff; }
-    .is-connected .clak-item__badge { opacity: 1; }
 
-    /* Type mode: a display strip with the HUD, and the keyboard in front of it. */
+    /* Type mode: a window panel strip holding the HUD, and the keyboard in front of it. */
     .deck__screen {
       position: absolute;
       left: 36px;
       right: 36px;
       top: 0;
       height: 222px;
-      padding: 9px;
-      border-radius: 22px;
-      background: #0b0b0d;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18), 0 24px 60px rgba(0, 0, 0, 0.28);
     }
-    .deck__screen .wall { inset: 9px; border-radius: 14px; }
-    .deck__screen .mbar { height: 34px; padding: 0 18px; font-size: 16px; gap: 20px; }
+    .deck__screen .wall { inset: 5px; border-radius: 19px; }
 
-    /* Lifted from MainView.swift at ~2.2x, since this face is shown at about 0.45. */
+    /* The Clak HUD as the film draws it: a wide pill, a status dot, monospace text. */
     .hud {
       position: absolute;
-      left: 28px;
-      top: 46px;
-      max-width: 600px;
+      left: 50%;
+      top: 62px;
+      width: 540px;
+      margin-left: -270px;
       display: flex;
-      align-items: flex-start;
-      gap: 16px;
-      padding: 20px 32px 22px;
-      border-radius: 26px;
-      background: rgba(40, 40, 44, 0.55);
-      -webkit-backdrop-filter: blur(24px) saturate(160%);
-      backdrop-filter: blur(24px) saturate(160%);
-      box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1.5px rgba(255, 255, 255, 0.1), 0 10px 40px rgba(0, 0, 0, 0.4);
+      align-items: center;
+      gap: 18px;
+      padding: 14px 30px;
+      border-radius: 20px;
+      background: linear-gradient(180deg, #1d2536 0%, #171d2b 100%);
+      box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.2), inset 0 0 0 1.5px rgba(255, 255, 255, 0.12), 0 14px 44px rgba(0, 0, 0, 0.5);
     }
-    .hud__chrome { display: flex; align-items: center; gap: 13px; height: 52px; color: rgba(235, 235, 245, 0.6); }
-    .hud__chrome svg { display: block; }
-    .hud__dot { position: relative; width: 15px; height: 15px; border-radius: 50%; background: #ff9f0a; transition: background-color 250ms ease; }
+    .hud__dot { position: relative; flex: none; width: 16px; height: 16px; border-radius: 50%; background: #ff9f0a; transition: background-color 250ms ease; }
     .hud__dot::after {
       content: "";
       position: absolute;
@@ -435,30 +427,28 @@
       from { transform: scale(1); opacity: 0.6; }
       to { transform: scale(2.5); opacity: 0; }
     }
-    .hud__dot.is-connected { background: #34c759; }
-    .hud__opt { opacity: 0; width: 0; overflow: hidden; transition: opacity 200ms ease, width 200ms ease; }
+    .hud__dot.is-connected { background: #30d158; }
+    .hud__opt { flex: none; display: block; color: rgba(240, 241, 243, 0.75); opacity: 0; width: 0; overflow: hidden; transition: opacity 200ms ease, width 200ms ease; }
     .hud__opt.is-on { opacity: 1; width: 22px; }
+    .hud__opt svg { display: block; }
     .hud__text {
-      font-family: var(--mono);
+      flex: 1;
+      min-width: 0;
+      font-family: Menlo, "SF Mono", ui-monospace, monospace;
       font-size: 36px;
       line-height: 52px;
-      color: #fff;
+      color: #f0f1f3;
       white-space: pre-wrap;
       word-break: break-word;
-      max-height: 104px;
+      max-height: 52px;
       overflow: hidden;
       transition: opacity 0.3s cubic-bezier(0.4, 0, 1, 1);
     }
-    .hud__text.is-hint {
-      font-family: ui-rounded, "SF Pro Rounded", var(--font);
-      font-weight: 300;
-      font-size: 40px;
-      color: rgba(235, 235, 245, 0.3);
-      white-space: nowrap;
-    }
-    .hud__text.is-searching { color: rgba(235, 235, 245, 0.4); animation: breathe 4s ease-in-out infinite; }
+    .hud__text.is-hint { color: rgba(240, 241, 243, 0.42); white-space: nowrap; }
+    .hud__text.is-searching { color: rgba(240, 241, 243, 0.5); animation: breathe 4s ease-in-out infinite; }
     @keyframes breathe { 50% { opacity: 0.6; } }
 
+    /* The film's generic keyboard: graphite, letters only, modifiers blank. */
     .deck__kbd {
       position: absolute;
       left: 8px;
@@ -469,9 +459,9 @@
       flex-direction: column;
       gap: 5px;
       padding: 13px 15px 14px;
-      border-radius: 22px;
-      background: linear-gradient(180deg, #e6e7e9 0%, #cdced2 100%);
-      box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.8), 0 2px 4px rgba(0, 0, 0, 0.16), 0 22px 50px rgba(0, 0, 0, 0.3);
+      border-radius: 20px;
+      background: linear-gradient(180deg, #1a1e26 0%, #111318 100%);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 22px 50px rgba(0, 0, 0, 0.55), 0 -10px 60px rgba(10, 70, 180, 0.2);
     }
     .krow { display: flex; gap: 5px; flex: 1 1 0; min-height: 0; }
     .krow--fn { flex-grow: 0.62; }
@@ -481,59 +471,83 @@
       display: grid;
       place-items: center;
       border-radius: 6px;
-      background: #232325;
-      color: #d9d9de;
-      font: 500 14px/1 var(--font);
-      box-shadow: inset 0 -1.5px 0 rgba(0, 0, 0, 0.5);
+      background: linear-gradient(180deg, #2a2e37 0%, #22252d 100%);
+      color: rgba(228, 233, 242, 0.8);
+      font: 500 13px/1 var(--font);
+      box-shadow: inset 0 -1.5px 0 rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05);
       transition: background-color 280ms ease, color 280ms ease, box-shadow 280ms ease;
     }
-    .krow--fn .k { font-size: 11px; }
+    .krow--fn .k { font-size: 10px; }
     .k.is-lit {
-      background: #0a84ff;
+      background: #3492ec;
       color: #fff;
-      box-shadow: 0 0 20px rgba(10, 132, 255, 0.65);
+      box-shadow: 0 0 20px rgba(52, 146, 236, 0.7);
       transition: none;
     }
     .k--arrows { display: flex; flex-direction: column; gap: 3px; background: none; box-shadow: none; }
-    .k--arrows .k { flex: 1; font-size: 9px; }
+    .k--arrows .k { flex: 1; }
 
-    /* Drive mode: the full Mac display. */
-    .face--screen {
-      padding: 10px;
-      border-radius: 24px;
-      background: #0b0b0d;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18), 0 28px 70px rgba(0, 0, 0, 0.3);
-    }
-    .face--screen .wall { inset: 10px; border-radius: 14px; }
-    .face--screen .mbar { height: 26px; padding: 0 14px; font-size: 13px; }
+    /* Drive mode: the whole window panel. */
+    .face--screen { border-radius: 26px; }
+    .face--screen .wall { inset: 5px; border-radius: 21px; }
 
+    /* An abstract content card: scrolls, fills the panel, shrinks back in the overview. */
     .win {
       position: absolute;
-      left: 64px;
-      top: 58px;
-      width: 330px;
-      height: 232px;
-      border-radius: 12px;
-      background: rgba(30, 30, 33, 0.94);
-      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 18px 44px rgba(0, 0, 0, 0.45);
-      color: rgba(255, 255, 255, 0.86);
-      font: 13px/1.2 var(--font);
+      left: 36px;
+      top: 44px;
+      width: 320px;
+      height: 250px;
+      border-radius: 16px;
+      background: #141a27;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 18px 44px rgba(0, 0, 0, 0.45);
       overflow: hidden;
       transition: transform 420ms cubic-bezier(0.32, 0.72, 0, 1), left 420ms cubic-bezier(0.32, 0.72, 0, 1),
-        top 420ms cubic-bezier(0.32, 0.72, 0, 1), width 420ms cubic-bezier(0.32, 0.72, 0, 1), height 420ms cubic-bezier(0.32, 0.72, 0, 1);
+        top 420ms cubic-bezier(0.32, 0.72, 0, 1), width 420ms cubic-bezier(0.32, 0.72, 0, 1), height 420ms cubic-bezier(0.32, 0.72, 0, 1),
+        border-radius 420ms cubic-bezier(0.32, 0.72, 0, 1);
     }
-    .win.is-full { left: 0; top: 26px; width: 700px; height: 404px; border-radius: 0; }
-    .win__bar { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
-    .win__bar i { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; }
-    .win__bar i:nth-child(2) { background: #febc2e; }
-    .win__bar i:nth-child(3) { background: #28c840; }
-    .win__bar b { margin-left: 10px; font-weight: 600; }
+    .win.is-full { left: 0; top: 0; width: 710px; height: 440px; border-radius: 21px; }
+    .win__bar { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+    .win__bar i { height: 7px; border-radius: 4px; background: rgba(240, 241, 243, 0.7); }
+    .win__bar i:first-child { width: 70px; }
+    .win__bar i:last-child { width: 28px; margin-left: auto; background: #3492ec; }
     .win__list { padding: 6px 8px; transition: transform 120ms linear; }
-    .win__row { display: flex; align-items: center; gap: 9px; height: 26px; padding: 0 8px; border-radius: 6px; }
-    .win__row:nth-child(odd) { background: rgba(255, 255, 255, 0.04); }
-    .win__row span { width: 14px; height: 16px; border-radius: 3px; background: #6aa8ff; flex: none; }
-    .win__row em { margin-left: auto; font-style: normal; color: rgba(255, 255, 255, 0.45); }
+    .win__row { display: flex; align-items: center; gap: 10px; height: 26px; padding: 0 8px; border-radius: 6px; }
+    .win__row:nth-child(odd) { background: #181f2d; }
+    .win__row span { flex: none; width: 12px; height: 12px; border-radius: 4px; background: #3492ec; }
+    .win__row b { height: 6px; border-radius: 3px; background: rgba(240, 241, 243, 0.42); }
+    .win__row em { margin-left: auto; width: 26px; height: 6px; border-radius: 3px; background: rgba(240, 241, 243, 0.2); }
+
+    /* Click targets: plain rounded tiles, one bounces when it's clicked. */
+    .tiles {
+      position: absolute;
+      left: 384px;
+      top: 44px;
+      display: grid;
+      grid-template-columns: 110px 110px;
+      grid-auto-rows: 76px;
+      gap: 16px;
+      transition: transform 420ms cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    .tile {
+      position: relative;
+      border-radius: 16px;
+      background: var(--tile);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 10px 26px rgba(0, 0, 0, 0.4);
+    }
+    .tile::before, .tile::after { content: ""; position: absolute; left: 14px; border-radius: 4px; }
+    .tile::before { top: 14px; width: 18px; height: 18px; border-radius: 50%; background: rgba(255, 255, 255, 0.9); }
+    .tile::after { bottom: 16px; width: 46px; height: 6px; background: rgba(255, 255, 255, 0.6); }
+    .tile.is-active { box-shadow: inset 0 0 0 2px #fff, 0 10px 30px rgba(10, 132, 255, 0.45); }
+    .tile.is-bouncing { animation: tile-bounce 0.9s cubic-bezier(0.3, 0, 0.3, 1); }
+    @keyframes tile-bounce {
+      25% { transform: translateY(-20px); }
+      50% { transform: translateY(0); }
+      70% { transform: translateY(-9px); }
+      100% { transform: translateY(0); }
+    }
     .is-mc .win { transform: scale(0.74) translateY(40px); }
+    .is-mc .tiles { transform: scale(0.82) translateY(24px); }
     .face--screen .wall.is-mc::after { opacity: 1; }
     .face--screen .wall::after {
       content: "";
@@ -545,108 +559,69 @@
       transition: opacity 300ms ease;
     }
 
-    .dock {
-      position: absolute;
-      left: 50%;
-      bottom: 8px;
-      transform: translateX(-50%);
-      display: flex;
-      gap: 9px;
-      padding: 8px 10px;
-      border-radius: 22px;
-      background: rgba(255, 255, 255, 0.18);
-      -webkit-backdrop-filter: blur(20px) saturate(160%);
-      backdrop-filter: blur(20px) saturate(160%);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.12);
-      z-index: 1;
-    }
-    .dock__app { position: relative; width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; color: #fff; }
-    .dock__app svg { width: 28px; height: 28px; }
-    .dock__app::after {
-      content: "";
-      position: absolute;
-      left: 50%;
-      bottom: -6px;
-      width: 4px;
-      height: 4px;
-      margin-left: -2px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.75);
-      opacity: 0;
-    }
-    .dock__app.is-running::after { opacity: 1; }
-    .dock__app.is-bouncing { animation: dock-bounce 0.9s cubic-bezier(0.3, 0, 0.3, 1); }
-    @keyframes dock-bounce {
-      25% { transform: translateY(-20px); }
-      50% { transform: translateY(0); }
-      70% { transform: translateY(-9px); }
-      100% { transform: translateY(0); }
-    }
-
-    /* macOS draws its own level HUD; the Mac is the one that knows the level. */
+    /* The Mac draws the level; the phone only ever says which way it turned. */
     .sysosd {
       position: absolute;
-      right: 14px;
-      top: 36px;
+      right: 18px;
+      top: 18px;
       display: flex;
       align-items: center;
       gap: 12px;
-      width: 236px;
-      height: 48px;
-      padding: 0 18px;
-      border-radius: 24px;
-      background: rgba(40, 40, 44, 0.62);
-      -webkit-backdrop-filter: blur(24px) saturate(160%);
-      backdrop-filter: blur(24px) saturate(160%);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 10px 30px rgba(0, 0, 0, 0.35);
-      color: #fff;
+      width: 210px;
+      height: 42px;
+      padding: 0 16px;
+      border-radius: 21px;
+      background: #161c2a;
+      box-shadow: var(--edge), 0 10px 30px rgba(0, 0, 0, 0.45);
+      color: #f0f1f3;
       opacity: 0;
       transform: translateY(-6px);
       transition: opacity 240ms cubic-bezier(0.4, 0, 1, 1), transform 240ms cubic-bezier(0.4, 0, 1, 1);
       z-index: 2;
     }
     .sysosd.is-on { opacity: 1; transform: none; transition: opacity 180ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-    .sysosd svg { width: 22px; height: 22px; flex: none; }
-    .sysosd__track { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.22); overflow: hidden; }
-    .sysosd__fill { height: 100%; width: 50%; background: #fff; border-radius: 3px; transition: width 120ms ease; }
+    .sysosd svg { width: 20px; height: 20px; flex: none; }
+    .sysosd__track { flex: 1; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
+    .sysosd__fill { height: 100%; width: 50%; background: #3492ec; border-radius: 3px; transition: width 120ms ease; }
 
+    /* A generic search field, in the film's dark-field style. */
     .spot {
       position: absolute;
       left: 50%;
-      top: 30%;
-      width: 440px;
-      height: 56px;
+      top: 32%;
+      width: 400px;
+      height: 54px;
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 0 22px;
-      border-radius: 28px;
-      background: rgba(40, 40, 44, 0.66);
-      -webkit-backdrop-filter: blur(28px) saturate(170%);
-      backdrop-filter: blur(28px) saturate(170%);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 20px 50px rgba(0, 0, 0, 0.4);
-      color: rgba(235, 235, 245, 0.55);
-      font: 21px/1 var(--font);
+      padding: 0 20px;
+      border-radius: 16px;
+      background: #19222e;
+      box-shadow: var(--edge), 0 20px 50px rgba(0, 0, 0, 0.55);
+      color: rgba(240, 241, 243, 0.55);
+      font: 20px/1 var(--font);
       opacity: 0;
       transform: translate(-50%, -50%) scale(0.96);
       transition: opacity 150ms cubic-bezier(0.4, 0, 1, 1), transform 150ms cubic-bezier(0.4, 0, 1, 1);
       z-index: 3;
     }
-    .spot svg { width: 22px; height: 22px; color: rgba(235, 235, 245, 0.7); }
+    .spot svg { width: 20px; height: 20px; color: rgba(240, 241, 243, 0.75); }
+    .spot i { width: 2.5px; height: 24px; margin-right: -9px; border-radius: 1.5px; background: #3492ec; }
     .spot.is-on { opacity: 1; transform: translate(-50%, -50%) scale(1); transition: opacity 240ms cubic-bezier(0.16, 1, 0.3, 1), transform 240ms cubic-bezier(0.16, 1, 0.3, 1); }
+    .spot.is-on i { animation: blink 1.1s steps(1) infinite; }
 
-    /* Pointer and click ring are counter-scaled so they read at any Mac size. */
+    /* Pointer and click ring are counter-scaled so they read at any panel size. */
     .pointer {
       position: absolute;
       left: 0;
       top: 0;
       width: 15px;
-      height: 23px;
+      height: 21px;
       transform-origin: 1.5px 1.5px;
-      transform: translate(var(--px, 350px), var(--py, 215px)) translate(-1.5px, -1.5px) scale(var(--inv, 1));
-      filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.5));
+      transform: translate(var(--px, 355px), var(--py, 220px)) translate(-1.5px, -1.5px) scale(var(--inv, 1));
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
       pointer-events: none;
-      z-index: 5;
+      z-index: 7;
       opacity: 0;
       transition: opacity 180ms ease;
     }
@@ -669,98 +644,88 @@
       to { transform: scale(var(--inv, 1)); opacity: 0; }
     }
 
-    /* The phone, in native pixels: a 224-wide screen stands for 393pt (k ~ 0.57). */
-    .phone {
-      width: 240px;
-      height: 520px;
-      padding: 8px;
-      border-radius: 44px;
-      background: #1b1c1f;
-      box-shadow: inset 0 0 0 1.5px #3a3b3f, 0 2px 4px rgba(0, 0, 0, 0.16), 0 26px 60px rgba(0, 0, 0, 0.3);
-    }
-    @media (prefers-color-scheme: dark) {
-      .phone { box-shadow: inset 0 0 0 1.5px #4a4b50, 0 0 0 1px rgba(255, 255, 255, 0.08), 0 26px 60px rgba(0, 0, 0, 0.55); }
-      .face--screen, .deck__screen { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 28px 70px rgba(0, 0, 0, 0.55); }
-    }
+    /* The phone side: a frameless, phone-proportioned glass panel. Native pixels, where a
+       224-wide screen stands for 393pt (k ~ 0.57). */
+    .phone { width: 232px; height: 488px; padding: 4px; border-radius: 34px; }
     .phone__screen {
       position: relative;
       width: 224px;
-      height: 504px;
-      border-radius: 36px;
+      height: 480px;
+      border-radius: 30px;
       overflow: hidden;
-      background: #000;
+      background:
+        radial-gradient(90% 45% at 50% 108%, rgba(27, 95, 214, 0.35), rgba(27, 95, 214, 0) 70%),
+        linear-gradient(180deg, #131a2c 0%, #0d1121 100%);
       color: #fff;
       font-family: var(--font);
     }
-    .sbar {
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 0;
-      height: 42px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 4px 20px 0 30px;
-      font-size: 13px;
-      font-weight: 600;
-      z-index: 3;
-    }
-    .sbar__icons { display: inline-flex; align-items: center; gap: 4px; }
-    .sbar svg { display: block; }
-    .island { position: absolute; left: 50%; top: 10px; width: 70px; height: 21px; margin-left: -35px; border-radius: 11px; background: #000; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05); }
-    .homebar { position: absolute; left: 50%; bottom: 6px; width: 80px; height: 4px; margin-left: -40px; border-radius: 2px; background: rgba(255, 255, 255, 0.55); z-index: 3; }
-    .face--notes, .face--remote { top: 42px; }
 
-    /* iOS Notes, dark: Notes' accent is gold, not system blue. */
-    .face--notes { display: flex; flex-direction: column; }
-    .notes__nav { display: flex; align-items: center; justify-content: space-between; height: 34px; padding: 0 12px 0 6px; color: #ffd60a; font-size: 15px; }
-    .notes__nav span { display: inline-flex; align-items: center; gap: 2px; }
-    .notes__acts { gap: 16px !important; }
-    .notes__body { flex: 1; min-height: 0; padding: 4px 16px 0; overflow: hidden; transition: opacity 300ms cubic-bezier(0.4, 0, 1, 1); }
-    .notes__body.is-wiping { opacity: 0; }
-    .notes__date { font-size: 11px; color: #8e8e93; text-align: center; margin-bottom: 8px; }
-    .notes__title { font-size: 21px; font-weight: 700; line-height: 1.2; margin-bottom: 4px; }
-    .notes__text { font-size: 15px; line-height: 1.4; color: #f2f2f7; white-space: pre-wrap; word-break: break-word; }
+    /* Type mode: the film's dark text field and blue caret. */
+    .field {
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      top: 192px;
+      min-height: 36px;
+      max-height: 240px;
+      padding: 8px 12px;
+      border-radius: 11px;
+      background: #19222e;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+      overflow: hidden;
+    }
+    .field__text {
+      font: 500 14px/20px Inter, var(--font);
+      color: #f0f1f3;
+      white-space: pre-wrap;
+      word-break: break-word;
+      transition: opacity 300ms cubic-bezier(0.4, 0, 1, 1);
+    }
+    .field.is-wiping .field__text { opacity: 0; }
     .caret {
       display: inline-block;
       width: 2px;
-      height: 1.15em;
+      height: 17px;
       margin-left: 1px;
-      margin-bottom: -0.2em;
+      margin-bottom: -3px;
       border-radius: 1px;
-      background: #ffd60a;
+      background: #3492ec;
       animation: blink 1.1s steps(1) infinite;
     }
     .is-typing .caret { animation: none; }
     @keyframes blink { 50% { opacity: 0; } }
-    .notes__tools { display: flex; justify-content: space-around; align-items: center; height: 42px; margin-bottom: 20px; color: #ffd60a; }
-    .notes__tools svg { width: 19px; height: 19px; }
 
-    /* iOS volume indicator: a slim capsule by the volume buttons. */
+    /* A generic volume capsule, floating at the top of the panel. */
     .vol {
       position: absolute;
-      left: 6px;
-      top: 78px;
-      width: 9px;
-      height: 92px;
-      border-radius: 5px;
-      background: rgba(120, 120, 128, 0.45);
-      -webkit-backdrop-filter: blur(10px);
-      backdrop-filter: blur(10px);
-      overflow: hidden;
+      left: 50%;
+      top: 16px;
+      width: 116px;
+      height: 26px;
+      margin-left: -58px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px 0 10px;
+      border-radius: 13px;
+      background: #1b2333;
+      box-shadow: var(--edge), 0 8px 20px rgba(0, 0, 0, 0.45);
+      color: #f0f1f3;
       opacity: 0;
-      transform: translateX(-4px);
+      transform: translateY(-4px);
       transition: opacity 240ms cubic-bezier(0.4, 0, 1, 1), transform 240ms cubic-bezier(0.4, 0, 1, 1);
     }
     .vol.is-on { opacity: 1; transform: none; transition: opacity 180ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-    .vol__fill { position: absolute; left: 0; right: 0; bottom: 0; height: 56%; background: #fff; transition: height 120ms ease; }
+    .vol svg { flex: none; width: 13px; height: 13px; }
+    .vol__track { position: relative; flex: 1; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
+    .vol__fill { position: absolute; left: 0; top: 0; bottom: 0; width: 56%; background: #3492ec; transition: width 120ms ease; }
 
     /* Clak Remote, connected: an empty glass pad and one glass control bar. */
-    .face--remote { display: flex; flex-direction: column; gap: 6px; padding: 4px 9px 20px; }
+    .face--remote { display: flex; flex-direction: column; gap: 6px; padding: 10px 9px 10px; }
+    /* Clak Remote's own glass, kept clear: a light edge over the panel, not a frosted fill. */
     .glass {
-      background: rgba(255, 255, 255, 0.075);
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+      background: rgba(255, 255, 255, 0.07);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.28);
     }
     .pad {
       position: relative;
@@ -775,6 +740,7 @@
     .pad:focus-visible { outline: 3px solid #3ea0ff; outline-offset: 2px; border-radius: 18px; }
     .cbar { flex: none; border-radius: 20px; padding: 0 5px 3px; }
     .grabber {
+      position: relative;
       display: flex;
       justify-content: center;
       align-items: center;
@@ -810,17 +776,15 @@
       border-radius: 10px;
       transition: opacity 220ms cubic-bezier(0.34, 1.4, 0.64, 1), transform 220ms cubic-bezier(0.34, 1.4, 0.64, 1);
     }
-    .cbar__extras .ck { height: 40px; }
     .ck svg { width: 17px; height: 17px; }
     .cbar__extras .ck svg { width: 15px; height: 15px; }
     .ck .badge { width: 6px; height: 6px; color: rgba(235, 235, 245, 0.6); margin-top: 6px; }
     .ck.is-pressed { opacity: 0.45; transform: scale(0.92); transition-duration: 60ms; }
     .ck.is-turning > svg:first-child { opacity: 0; }
     .ck:focus-visible, .grabber:focus-visible { outline: 3px solid #3ea0ff; outline-offset: -2px; }
-    /* The phone is drawn at native size and scaled down, so hit areas reach past the glyphs vertically. */
+    /* The panel is drawn at native size and scaled down, so hit areas reach past the glyphs vertically. */
     .cbar__row .ck::after { content: ''; position: absolute; left: 0; right: 0; top: 0; bottom: -10px; }
     .grabber::after { content: ''; position: absolute; left: 0; right: 0; top: -8px; bottom: 0; }
-    .grabber { position: relative; }
     .cbar__sep { flex: none; width: 1px; height: 16px; background: rgba(255, 255, 255, 0.09); }
 
     .touch {
@@ -837,7 +801,7 @@
       opacity: 0;
       transform: translate(var(--tx, 0), var(--ty, 0)) scale(0.6);
       transition: opacity 180ms cubic-bezier(0.4, 0, 1, 1), transform 180ms cubic-bezier(0.4, 0, 1, 1);
-      z-index: 6;
+      z-index: 8;
     }
     .touch.is-down { opacity: 0.9; transform: translate(var(--tx, 0), var(--ty, 0)) scale(1); transition: opacity 120ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1); }
     .touch.is-moving { transition: opacity 120ms ease; }
@@ -871,7 +835,7 @@
       place-items: center;
       border-radius: 50%;
       border: 1px solid var(--hairline);
-      background: var(--bg);
+      background: rgba(255, 255, 255, 0.05);
       color: var(--text-2);
       cursor: pointer;
     }
@@ -1091,21 +1055,7 @@
           <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M13.5 6.5 19 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
           <symbol id="i-pause" viewBox="0 0 24 24"><rect x="5" y="3" width="5" height="18" rx="1.5" fill="currentColor"/><rect x="14" y="3" width="5" height="18" rx="1.5" fill="currentColor"/></symbol>
           <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 3.8v16.4a1 1 0 0 0 1.5.9l13.2-8.2a1 1 0 0 0 0-1.8L7.5 2.9A1 1 0 0 0 6 3.8z" fill="currentColor"/></symbol>
-          <symbol id="i-xmark" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></symbol>
           <symbol id="i-caps" viewBox="0 0 24 24"><path d="M12 2.5 2.5 12.2h5.3V16h8.4v-3.8h5.3z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><rect x="7.8" y="18" width="8.4" height="3.2" rx="1" fill="currentColor"/></symbol>
-          <symbol id="i-cursor-lines" viewBox="0 0 24 24"><path d="M10 3.5v15.2l3.6-3.4 2.4 5.4 2.6-1.1-2.4-5.3h5.1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M2.5 8.5h4.5M2 12.5h5M3.5 16.5h3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
-          <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="1.8" y="5.5" width="20.4" height="13" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M5.6 9.4h.01M8.6 9.4h.01M11.6 9.4h.01M14.6 9.4h.01M17.6 9.4h.01M5.6 12.2h.01M8.6 12.2h.01M11.6 12.2h.01M14.6 12.2h.01M17.6 12.2h.01M7.5 15.1h9" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
-          <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2 8.8a14.5 14.5 0 0 1 20 0M5.2 12.2a10 10 0 0 1 13.6 0M8.4 15.6a5.4 5.4 0 0 1 7.2 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="19.2" r="1.8" fill="currentColor"/></symbol>
-          <symbol id="i-signal" viewBox="0 0 24 24"><rect x="1" y="15" width="4" height="6" rx="1" fill="currentColor"/><rect x="7" y="11" width="4" height="10" rx="1" fill="currentColor"/><rect x="13" y="7" width="4" height="14" rx="1" fill="currentColor"/><rect x="19" y="3" width="4" height="18" rx="1" fill="currentColor"/></symbol>
-          <symbol id="i-battery" viewBox="0 0 28 14"><rect x="1" y="1" width="22" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-opacity=".45" stroke-width="1.2"/><rect x="2.8" y="2.8" width="16" height="8.4" rx="2" fill="currentColor"/><path d="M24.8 5v4a2 2 0 0 0 0-4z" fill="currentColor" fill-opacity=".45"/></symbol>
-          <symbol id="i-chev-left" viewBox="0 0 24 24"><path d="M15 4.5 7.5 12l7.5 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-          <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 2.8v12.4M7.8 7 12 2.8 16.2 7M8 10H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-          <symbol id="i-ellipsis-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7.8 12h.01M12 12h.01M16.2 12h.01" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
-          <symbol id="i-checklist" viewBox="0 0 24 24"><path d="M3.5 6.5 5.2 8.2 8.2 5M3.5 15.5l1.7 1.7 3-3.2M11.5 7h9M11.5 16h9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-          <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 9.5h18M3 14.8h18M9 9.5V20M15 9.5V20" stroke="currentColor" stroke-width="1.6"/></symbol>
-          <symbol id="i-clip" viewBox="0 0 24 24"><path d="m19.5 11.5-7.4 7.4a4.8 4.8 0 0 1-6.8-6.8l7.6-7.6a3.2 3.2 0 0 1 4.5 4.5l-7.3 7.3a1.6 1.6 0 0 1-2.3-2.3l6.7-6.7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-          <symbol id="i-markup" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m8.5 15.5.9-3.4 4.6-4.6 2.5 2.5-4.6 4.6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
-          <symbol id="i-compose" viewBox="0 0 24 24"><path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5M17.6 3.4l3 3-8.4 8.4-3.6.6.6-3.6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
           <symbol id="i-backward" viewBox="0 0 24 24"><path d="M11.5 6.2v11.6a.8.8 0 0 1-1.3.6L2.8 12.6a.8.8 0 0 1 0-1.2l7.4-5.8a.8.8 0 0 1 1.3.6zM21.5 6.2v11.6a.8.8 0 0 1-1.3.6l-7.4-5.8a.8.8 0 0 1 0-1.2l7.4-5.8a.8.8 0 0 1 1.3.6z" fill="currentColor"/></symbol>
           <symbol id="i-forward" viewBox="0 0 24 24"><path d="M12.5 6.2v11.6a.8.8 0 0 0 1.3.6l7.4-5.8a.8.8 0 0 0 0-1.2l-7.4-5.8a.8.8 0 0 0-1.3.6zM2.5 6.2v11.6a.8.8 0 0 0 1.3.6l7.4-5.8a.8.8 0 0 0 0-1.2L3.8 5.6a.8.8 0 0 0-1.3.6z" fill="currentColor"/></symbol>
           <symbol id="i-playpause" viewBox="0 0 24 24"><path d="M1.5 6.2v11.6a.8.8 0 0 0 1.3.6l7.4-5.8a.8.8 0 0 0 0-1.2L2.8 5.6a.8.8 0 0 0-1.3.6z" fill="currentColor"/><rect x="13.5" y="5.5" width="3" height="13" rx="1" fill="currentColor"/><rect x="19" y="5.5" width="3" height="13" rx="1" fill="currentColor"/></symbol>
@@ -1120,12 +1070,6 @@
           <symbol id="i-mc" viewBox="0 0 24 24"><rect x="2.5" y="4" width="8.5" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="13" y="4" width="8.5" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="6" y="13.5" width="12" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
           <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.3" cy="10.3" r="6.6" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15.2 15.2 5.6 5.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
           <symbol id="i-mic" viewBox="0 0 24 24"><rect x="8.6" y="2.5" width="6.8" height="12" rx="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
-          <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2h8.4A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" fill="currentColor"/></symbol>
-          <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m15.8 8.2-2.4 5.2-5.2 2.4 2.4-5.2z" fill="currentColor"/></symbol>
-          <symbol id="i-bubble" viewBox="0 0 24 24"><path d="M12 4c5 0 9 3.2 9 7.3s-4 7.3-9 7.3c-1 0-2-.1-2.9-.4L5 20l1-3.6C4.1 15 3 13.3 3 11.3 3 7.2 7 4 12 4z" fill="currentColor"/></symbol>
-          <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 17.5V6.2l10-2.2v11.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><ellipse cx="6.8" cy="17.6" rx="2.6" ry="2.1" fill="currentColor"/><ellipse cx="16.8" cy="15.4" rx="2.6" ry="2.1" fill="currentColor"/></symbol>
-          <symbol id="i-lines" viewBox="0 0 24 24"><path d="M6 7h12M6 11.5h12M6 16h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
-          <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
         </defs>
       </svg>
 
@@ -1145,93 +1089,53 @@
         </div>
 
         <div class="scene" id="scene" data-mode="type">
-          <!-- The Mac. Type mode shows its display strip and keyboard; drive mode shows the whole display. -->
+          <!-- The Mac side. Type mode: a window panel strip with the HUD, and the keyboard.
+               Drive mode: the whole window panel. -->
           <div class="dev mac" id="mac" aria-hidden="true">
             <div class="face face--deck" id="deck">
-              <div class="deck__screen">
+              <div class="deck__screen slab">
                 <div class="wall">
-                  <div class="mbar">
-                    <b>Clak</b>
-                    <span class="mbar__menus"><span>Edit</span><span>Window</span><span>Help</span></span>
-                    <span class="mbar__right">
-                      <span class="clak-item">
-                        <svg width="22" height="22"><use href="#i-keyboard"/></svg>
-                        <svg class="clak-item__badge" width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5.5" fill="#0a84ff" stroke="#1e2a44" stroke-width="1"/><path d="M3.4 6h.01M6 6h.01M8.6 6h.01" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>
-                      </span>
-                      <svg width="20" height="20"><use href="#i-wifi"/></svg>
-                      <span data-mac-clock></span>
-                    </span>
-                  </div>
                   <div class="hud" id="hud">
-                    <div class="hud__chrome">
-                      <svg width="20" height="20"><use href="#i-xmark"/></svg>
-                      <span class="hud__dot is-searching" id="dot"></span>
-                      <span class="hud__opt" id="caps"><svg width="22" height="22"><use href="#i-caps"/></svg></span>
-                      <span class="hud__opt" id="cursorIcon"><svg width="22" height="22"><use href="#i-cursor-lines"/></svg></span>
-                    </div>
+                    <span class="hud__dot is-searching" id="dot"></span>
                     <div class="hud__text is-hint is-searching" id="hudText">Searching...</div>
+                    <span class="hud__opt" id="caps"><svg width="22" height="22"><use href="#i-caps"/></svg></span>
                   </div>
                 </div>
               </div>
               <div class="deck__kbd" id="kbd"></div>
             </div>
 
-            <div class="face face--screen" id="screenFace">
+            <div class="face face--screen slab" id="screenFace">
               <div class="wall" id="wall">
-                <div class="mbar">
-                  <b id="macApp">Finder</b>
-                  <span class="mbar__menus"><span>File</span><span>Edit</span><span>View</span><span>Go</span><span>Window</span><span>Help</span></span>
-                  <span class="mbar__right">
-                    <span class="clak-item"><svg width="17" height="17"><use href="#i-keyboard"/></svg></span>
-                    <svg width="15" height="15"><use href="#i-wifi"/></svg>
-                    <span data-mac-clock></span>
-                  </span>
-                </div>
                 <div class="win" id="win">
-                  <div class="win__bar"><i></i><i></i><i></i><b>Downloads</b></div>
+                  <div class="win__bar"><i></i><i></i></div>
                   <div class="win__list" id="winList"></div>
                 </div>
-                <div class="dock" id="dock"></div>
+                <div class="tiles" id="tiles"></div>
                 <div class="sysosd" id="sysosd">
                   <svg><use id="sysosdIcon" href="#i-spk2"/></svg>
                   <div class="sysosd__track"><div class="sysosd__fill" id="sysosdFill"></div></div>
                 </div>
-                <div class="spot" id="spot"><svg><use href="#i-search"/></svg><span>Spotlight Search</span></div>
-                <!-- The macOS arrow: vertical left edge, black fill, white outline. -->
-                <svg class="pointer" id="pointer" viewBox="0 0 12 19">
-                  <path d="M1.5 1.2v15.2l3.7-3.3 2.2 5.1 2.2-.9-2.2-5h4z" fill="#000" stroke="#fff" stroke-width="1.1" stroke-linejoin="round"/>
+                <div class="spot" id="spot"><svg><use href="#i-search"/></svg><i></i><span>Search</span></div>
+                <svg class="pointer" id="pointer" viewBox="0 0 12 17">
+                  <path d="M1.5 1.2v13.4l3.4-3 2.1 4.6 2-.9-2-4.5h3.9z" fill="#fff" stroke="#0e1222" stroke-width="1.1" stroke-linejoin="round"/>
                 </svg>
               </div>
             </div>
           </div>
 
-          <!-- The iPhone. Type mode: Notes receiving keystrokes. Drive mode: Clak Remote. -->
-          <div class="dev phone" id="phone">
+          <!-- The phone side: a frameless glass panel. Type mode: a text field receiving
+               keystrokes. Drive mode: Clak Remote. -->
+          <div class="dev phone slab" id="phone">
             <div class="phone__screen" id="phoneScreen">
-              <div class="sbar" aria-hidden="true">
-                <span data-phone-clock></span>
-                <span class="island"></span>
-                <span class="sbar__icons">
-                  <svg width="15" height="11"><use href="#i-signal"/></svg>
-                  <svg width="15" height="12"><use href="#i-wifi"/></svg>
-                  <svg width="24" height="12"><use href="#i-battery"/></svg>
-                </span>
-              </div>
-
-              <div class="face face--notes" id="notes" aria-hidden="true">
-                <div class="notes__nav">
-                  <span><svg width="18" height="18"><use href="#i-chev-left"/></svg>Notes</span>
-                  <span class="notes__acts"><svg width="18" height="18"><use href="#i-share"/></svg><svg width="19" height="19"><use href="#i-ellipsis-circle"/></svg></span>
+              <div class="face face--field" id="notes" aria-hidden="true">
+                <div class="field" id="noteBody">
+                  <p class="field__text"><span id="noteText"></span><span class="caret"></span></p>
                 </div>
-                <div class="notes__body" id="noteBody">
-                  <p class="notes__date" id="noteDate"></p>
-                  <p class="notes__title">Tonight</p>
-                  <p class="notes__text"><span id="noteText"></span><span class="caret"></span></p>
+                <div class="vol" id="vol">
+                  <svg aria-hidden="true"><use href="#i-spk2"/></svg>
+                  <div class="vol__track"><div class="vol__fill" id="volFill"></div></div>
                 </div>
-                <div class="notes__tools">
-                  <svg><use href="#i-checklist"/></svg><svg><use href="#i-table"/></svg><svg><use href="#i-clip"/></svg><svg><use href="#i-markup"/></svg><svg><use href="#i-compose"/></svg>
-                </div>
-                <div class="vol" id="vol"><div class="vol__fill" id="volFill"></div></div>
               </div>
 
               <div class="face face--remote" id="remote" role="group" aria-label="Clak Remote on the iPhone" inert>
@@ -1257,7 +1161,7 @@
                 </div>
               </div>
 
-              <svg class="dial" id="dial" viewBox="0 0 224 504" aria-hidden="true">
+              <svg class="dial" id="dial" viewBox="0 0 224 480" aria-hidden="true">
                 <circle id="dialDisc" r="20" fill="rgba(0,0,0,.7)"/>
                 <circle id="dialBand" r="40" fill="none" stroke="rgba(255,255,255,.13)" stroke-width="25"/>
                 <circle id="dialRim" r="52" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="1"/>
@@ -1265,7 +1169,6 @@
                 <use id="dialHub" class="dial__hub" href="#i-spk2" width="17" height="17" color="#fff"/>
               </svg>
               <span class="touch" id="touch"></span>
-              <span class="homebar"></span>
             </div>
           </div>
         </div>
@@ -1397,10 +1300,10 @@
 
     const stage = $('stage'), scene = $('scene'), macEl = $('mac'), phoneEl = $('phone');
     const sw = $('switch'), swButtons = [...sw.querySelectorAll('button')];
-    const hudText = $('hudText'), dot = $('dot'), capsIcon = $('caps'), cursorIcon = $('cursorIcon');
-    const deck = $('deck'), kbd = $('kbd'), noteText = $('noteText'), noteBody = $('noteBody');
+    const hudText = $('hudText'), dot = $('dot'), capsIcon = $('caps');
+    const kbd = $('kbd'), noteText = $('noteText'), noteBody = $('noteBody');
     const vol = $('vol'), volFill = $('volFill');
-    const wall = $('wall'), win = $('win'), winList = $('winList'), dock = $('dock'), macApp = $('macApp');
+    const wall = $('wall'), win = $('win'), winList = $('winList'), tiles = $('tiles');
     const sysosd = $('sysosd'), sysosdIcon = $('sysosdIcon'), sysosdFill = $('sysosdFill'), spot = $('spot'), pointer = $('pointer');
     const phoneScreen = $('phoneScreen'), remote = $('remote'), pad = $('pad'), cbar = $('cbar'), grabber = $('grabber');
     const dialEl = $('dial'), dialTicks = $('dialTicks'), dialHub = $('dialHub'), touchEl = $('touch');
@@ -1414,46 +1317,36 @@
 
     const SENTENCE = 'Save me a seat, be there in 5';
 
-    // Both clocks are the visitor's own, like the real menu bar and status bar.
-    function tick() {
-      const now = new Date();
-      const t = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-      const day = now.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-      document.querySelectorAll('[data-mac-clock]').forEach((el) => { el.textContent = day + '  ' + t; });
-      document.querySelectorAll('[data-phone-clock]').forEach((el) => { el.textContent = t.replace(/\s?[ap]\.?\s?m\.?$/i, ''); });
-      $('noteDate').textContent = now.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) + ' at ' + t;
-    }
-    tick();
-    setInterval(tick, 20000);
-
     // MARK: static scenery
 
-    // Keycap rows: [KeyboardEvent.code, legend, width in keys].
-    const letters = (s) => [...s].map((c) => ['Key' + c, c]);
+    // Keycap rows: [KeyboardEvent.code, width in keys]. The film's generic keyboard:
+    // letters carry legends, F12 says what it is, every other cap is blank.
+    const letters = (s) => [...s].map((c) => ['Key' + c]);
     const KEY_ROWS = [
-      [['Escape', 'esc', 1.5], ...Array.from({ length: 12 }, (_, i) => ['F' + (i + 1), 'F' + (i + 1)]), ['Power', '', 1]],
-      [['Backquote', '`'], ...[...'1234567890'].map((d) => ['Digit' + d, d]), ['Minus', '-'], ['Equal', '='], ['Backspace', '⌫', 1.5]],
-      [['Tab', '⇥', 1.5], ...letters('QWERTYUIOP'), ['BracketLeft', '['], ['BracketRight', ']'], ['Backslash', '\\']],
-      [['CapsLock', '⇪', 1.8], ...letters('ASDFGHJKL'), ['Semicolon', ';'], ['Quote', "'"], ['Enter', '↩', 1.8]],
-      [['ShiftLeft', '⇧', 2.35], ...letters('ZXCVBNM'), ['Comma', ','], ['Period', '.'], ['Slash', '/'], ['ShiftRight', '⇧', 2.35]],
-      [['Fn', 'fn'], ['ControlLeft', '⌃'], ['AltLeft', '⌥'], ['MetaLeft', '⌘', 1.3], ['Space', '', 5.3], ['MetaRight', '⌘', 1.3], ['AltRight', '⌥'], 'arrows'],
+      [['Escape', 1.5], ...Array.from({ length: 12 }, (_, i) => ['F' + (i + 1)]), ['Power']],
+      [['Backquote'], ...[...'1234567890'].map((d) => ['Digit' + d]), ['Minus'], ['Equal'], ['Backspace', 1.5]],
+      [['Tab', 1.5], ...letters('QWERTYUIOP'), ['BracketLeft'], ['BracketRight'], ['Backslash']],
+      [['CapsLock', 1.8], ...letters('ASDFGHJKL'), ['Semicolon'], ['Quote'], ['Enter', 1.8]],
+      [['ShiftLeft', 2.35], ...letters('ZXCVBNM'), ['Comma'], ['Period'], ['Slash'], ['ShiftRight', 2.35]],
+      [['Fn'], ['ControlLeft'], ['AltLeft'], ['MetaLeft', 1.3], ['Space', 5.3], ['MetaRight', 1.3], ['AltRight'], 'arrows'],
     ];
+    const legend = (code) => (/^Key.$/.test(code) ? code.slice(3) : code === 'F12' ? 'F12' : '');
     KEY_ROWS.forEach((row, r) => {
       const el = document.createElement('div');
       el.className = 'krow' + (r === 0 ? ' krow--fn' : '');
       row.forEach((k) => {
         if (k === 'arrows') {
           el.insertAdjacentHTML('beforeend',
-            '<span class="k" data-code="ArrowLeft">◀</span>' +
-            '<span class="k k--arrows"><span class="k" data-code="ArrowUp">▲</span><span class="k" data-code="ArrowDown">▼</span></span>' +
-            '<span class="k" data-code="ArrowRight">▶</span>');
+            '<span class="k" data-code="ArrowLeft"></span>' +
+            '<span class="k k--arrows"><span class="k" data-code="ArrowUp"></span><span class="k" data-code="ArrowDown"></span></span>' +
+            '<span class="k" data-code="ArrowRight"></span>');
           return;
         }
         const key = document.createElement('span');
         key.className = 'k';
         key.dataset.code = k[0];
-        key.textContent = k[1];
-        if (k[2]) key.style.flexGrow = k[2];
+        key.textContent = legend(k[0]);
+        if (k[1]) key.style.flexGrow = k[1];
         el.appendChild(key);
       });
       kbd.appendChild(el);
@@ -1476,28 +1369,22 @@
       litTimers.set(el, later(ms, () => el.classList.remove('is-lit')));
     }
 
-    const APPS = [
-      ['Finder', 'i-folder', 'linear-gradient(160deg,#6fd0ff,#1f74e8)', '#fff'],
-      ['Safari', 'i-compass', 'linear-gradient(160deg,#ffffff,#d6e8ff)', '#1a6fe0'],
-      ['Messages', 'i-bubble', 'linear-gradient(160deg,#6ef08b,#1cb33f)', '#fff'],
-      ['Music', 'i-note', 'linear-gradient(160deg,#ff6b81,#e8173a)', '#fff'],
-      ['Notes', 'i-lines', 'linear-gradient(180deg,#ffe066 0 28%,#fbfbf7 28%)', '#9a7a12'],
-      ['System Settings', 'i-gear', 'linear-gradient(160deg,#b4b4ba,#6b6b72)', '#fff'],
+    // Plain tiles stand in for things to click; TARGET is the one the loop drives to.
+    const TILES = [
+      'linear-gradient(160deg,#3ea0ff,#0a6fe0)', 'linear-gradient(160deg,#343c4d,#232834)',
+      'linear-gradient(160deg,#20b3c9,#0d7f96)', 'linear-gradient(160deg,#6d6af0,#4340c4)',
+      'linear-gradient(160deg,#3b4457,#262c39)', 'linear-gradient(160deg,#34c77b,#1a9656)',
     ];
-    APPS.forEach(([name, icon, bg, fg], i) => {
-      dock.insertAdjacentHTML('beforeend',
-        `<span class="dock__app${i === 0 ? ' is-running' : ''}" data-app="${name}" style="background:${bg};color:${fg}"><svg><use href="#${icon}"/></svg></span>`);
-    });
-    ['Boarding pass.pdf|2 MB', 'Clak.dmg|4 MB', 'Invoice 0927.pdf|88 KB', 'IMG_4412.heic|3 MB', 'Lease draft.pages|1 MB',
-      'Playlist.m3u|4 KB', 'Recipes.txt|12 KB', 'Screenshot 9.41.png|640 KB', 'Slides v3.key|18 MB', 'Tax 2025.zip|6 MB',
-      'Trip notes.md|9 KB', 'Wallpaper.jpg|2 MB', 'Zine.pdf|5 MB'].forEach((row) => {
-      const [name, size] = row.split('|');
-      winList.insertAdjacentHTML('beforeend', `<div class="win__row"><span></span>${name}<em>${size}</em></div>`);
+    const TARGET = 3;
+    TILES.forEach((bg) => tiles.insertAdjacentHTML('beforeend', `<span class="tile" style="--tile:${bg}"></span>`));
+    const tileEls = [...tiles.children];
+    [62, 48, 80, 55, 70, 44, 66, 52, 76, 58, 40, 68, 50].forEach((w) => {
+      winList.insertAdjacentHTML('beforeend', `<div class="win__row"><span></span><b style="width:${w}%"></b><em></em></div>`);
     });
 
     // MARK: layout
-    // Each device keeps one native size; a mode only picks where it sits and how big it looks.
-    const MAC_W = 720, MAC_H = 450, PH_W = 240, PH_H = 520;
+    // Each panel keeps one native size; a mode only picks where it sits and how big it looks.
+    const MAC_W = 720, MAC_H = 450, PH_W = 232, PH_H = 488;
     let L = null;
     let mode = 'type';
 
@@ -1620,8 +1507,6 @@
       connected = true;
       dot.classList.remove('is-searching');
       dot.classList.add('is-connected');
-      cursorIcon.classList.add('is-on');
-      deck.classList.add('is-connected');
       paintHud();
     }
 
@@ -1639,7 +1524,7 @@
       later(40, () => noteApply(op));
     }
 
-    // F10 to F12 reach iOS as consumer keys and iOS draws its own volume capsule.
+    // F10 to F12 reach the phone as consumer keys and the phone draws its own volume capsule.
     // Nothing about the level comes back to the Mac.
     let iosVol = 9, iosMuted = false, iosVolTimer = null;
     function media(fkey) {
@@ -1648,7 +1533,7 @@
       later(40, () => {
         if (fkey === 'F10') iosMuted = !iosMuted;
         else { iosMuted = false; iosVol = clamp(iosVol + (fkey === 'F12' ? 1 : -1), 0, 16); }
-        volFill.style.height = (iosMuted ? 0 : (iosVol / 16) * 100) + '%';
+        volFill.style.width = (iosMuted ? 0 : (iosVol / 16) * 100) + '%';
         vol.classList.add('is-on');
         clearTimeout(iosVolTimer);
         iosVolTimer = later(1400, () => vol.classList.remove('is-on'));
@@ -1658,7 +1543,7 @@
     // Pointer. Finger speed is measured in phone points and run through the
     // acceleration curve; at ordinary speeds the Mac pointer covers about 0.8x
     // the distance the finger does on screen.
-    const WALL_W = 700, WALL_H = 430;
+    const WALL_W = 710, WALL_H = 440;
     const ACCEL = { min: 0.5, max: 4.5, maxSpeed: 1400, exponent: 1.4 };
     const POINTER_RATIO = 0.8;
     const gain = (v) => ACCEL.min + (ACCEL.max - ACCEL.min) * Math.pow(Math.min(v / ACCEL.maxSpeed, 1), ACCEL.exponent);
@@ -1682,15 +1567,13 @@
       placePointer();
     }
 
-    function appCenter(name) {
-      const el = dock.querySelector(`[data-app="${name}"]`);
+    function tileCenter(i) {
+      const el = tileEls[i];
       return {
-        x: dock.offsetLeft - dock.offsetWidth / 2 + el.offsetLeft + el.offsetWidth / 2,
-        y: dock.offsetTop + el.offsetTop + el.offsetHeight / 2,
+        x: tiles.offsetLeft + el.offsetLeft + el.offsetWidth / 2,
+        y: tiles.offsetTop + el.offsetTop + el.offsetHeight / 2,
       };
     }
-
-    function setApp(name) { macApp.textContent = name; }
 
     function click() {
       const ring = document.createElement('span');
@@ -1701,21 +1584,16 @@
       later(420, () => ring.remove());
       if (spot.classList.contains('is-on')) { spot.classList.remove('is-on'); return; }
       if (wall.classList.contains('is-mc')) { wall.classList.remove('is-mc'); return; }
-      const hit = APPS.find(([name]) => {
-        const c = appCenter(name);
-        return Math.abs(c.x - px) < 29 && Math.abs(c.y - py) < 29;
+      const el = tileEls.find((t, i) => {
+        const c = tileCenter(i);
+        return Math.abs(c.x - px) < t.offsetWidth / 2 && Math.abs(c.y - py) < t.offsetHeight / 2;
       });
-      if (hit) {
-        const el = dock.querySelector(`[data-app="${hit[0]}"]`);
-        if (!el.classList.contains('is-running')) {
-          el.classList.remove('is-bouncing');
-          void el.offsetWidth;
-          el.classList.add('is-bouncing');
-          later(900, () => { el.classList.remove('is-bouncing'); el.classList.add('is-running'); });
-        }
-        setApp(hit[0]);
-      } else {
-        setApp('Finder');
+      if (el && !el.classList.contains('is-active')) {
+        tileEls.forEach((t) => t.classList.remove('is-active'));
+        el.classList.remove('is-bouncing');
+        void el.offsetWidth;
+        el.classList.add('is-bouncing');
+        later(900, () => { el.classList.remove('is-bouncing'); el.classList.add('is-active'); });
       }
     }
 
@@ -1726,7 +1604,7 @@
       winList.style.transform = `translateY(${-winScroll}px)`;
     }
 
-    // macOS draws the level; the phone only ever says which way it turned.
+    // The Mac draws the level; the phone only ever says which way it turned.
     const levels = { volume: 8, brightness: 10 };
     let macMuted = false, osdTimer = null;
     function showSysOsd(kind) {
@@ -2175,12 +2053,11 @@
     async function actRemote(ctx) {
       setMode('remote');
       levels.volume = 8;
-      setApp('Finder');
-      dock.querySelector('[data-app="Music"]').classList.remove('is-running');
+      tileEls.forEach((t) => t.classList.remove('is-active', 'is-bouncing'));
       await wait(1000, ctx);
 
       // Flick then settle: fast finger, far pointer; slow finger, fine control.
-      const target = appCenter('Music');
+      const target = tileCenter(TARGET);
       const plan = planGlide(target.x, target.y - 4);
       const pr = padRect(), total = plan.flick + APPROACH;
       finger.down(pr.x + pr.w / 2 - plan.ux * total / 2, pr.y + pr.h * 0.45 - plan.uy * total / 2);
@@ -2410,7 +2287,7 @@
       reset();
       if (coarse.matches) {
         setMode('remote');
-        const c = appCenter('Music');
+        const c = tileCenter(TARGET);
         px = c.x - 30;
         py = c.y - 60;
         placePointer();
