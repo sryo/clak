@@ -504,14 +504,12 @@
     .win__bar { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
     .win__bar i { height: 7px; border-radius: 4px; background: rgba(240, 241, 243, 0.7); }
     .win__bar i:first-child { width: 70px; }
-    .win__bar i:last-child { width: 28px; margin-left: auto; background: #3492ec; }
+    .win__bar i:last-child { width: 28px; margin-left: auto; background: rgba(240, 241, 243, 0.3); }
     .win__list { padding: 6px 8px; transition: transform 120ms linear; }
     .win__row { display: flex; align-items: center; gap: 10px; height: 26px; padding: 0 8px; border-radius: 6px; }
-    .win__row:nth-child(odd) { background: #181f2d; }
-    .win__row span { flex: none; width: 12px; height: 12px; border-radius: 4px; background: #3492ec; }
-    .win__row b { height: 6px; border-radius: 3px; background: rgba(240, 241, 243, 0.42); }
-    .win__row em { margin-left: auto; width: 26px; height: 6px; border-radius: 3px; background: rgba(240, 241, 243, 0.2); }
-
+        .win__row span { flex: none; width: 12px; height: 12px; border-radius: 4px; background: rgba(240, 241, 243, 0.18); }
+    .win__row b { height: 6px; border-radius: 3px; background: rgba(240, 241, 243, 0.3); }
+    
     /* Click targets: plain rounded tiles, one bounces when it's clicked. */
     .tiles {
       position: absolute;
@@ -528,10 +526,7 @@
       border-radius: 16px;
       background: var(--tile);
     }
-    .tile::before, .tile::after { content: ""; position: absolute; left: 14px; border-radius: 4px; }
-    .tile::before { top: 14px; width: 18px; height: 18px; border-radius: 50%; background: rgba(255, 255, 255, 0.9); }
-    .tile::after { bottom: 16px; width: 46px; height: 6px; background: rgba(255, 255, 255, 0.6); }
-    .tile.is-active { box-shadow: inset 0 0 0 2px #fff; }
+    .tile.is-active { background: #0a84ff; }
     .tile.is-bouncing { animation: tile-bounce 0.9s cubic-bezier(0.3, 0, 0.3, 1); }
     @keyframes tile-bounce {
       25% { transform: translateY(-20px); }
@@ -1356,15 +1351,15 @@
 
     // Plain tiles stand in for things to click; TARGET is the one the loop drives to.
     const TILES = [
-      '#0a84ff', '#2c3240',
-      '#1497ad', '#5856d6',
-      '#343a48', '#28a765',
+      '#232936', '#232936',
+      '#232936', '#232936',
+      '#232936', '#232936',
     ];
     const TARGET = 3;
     TILES.forEach((bg) => tiles.insertAdjacentHTML('beforeend', `<span class="tile" style="--tile:${bg}"></span>`));
     const tileEls = [...tiles.children];
     [62, 48, 80, 55, 70, 44, 66, 52, 76, 58, 40, 68, 50].forEach((w) => {
-      winList.insertAdjacentHTML('beforeend', `<div class="win__row"><span></span><b style="width:${w}%"></b><em></em></div>`);
+      winList.insertAdjacentHTML('beforeend', `<div class="win__row"><span></span><b style="width:${w}%"></b></div>`);
     });
 
     // MARK: layout
