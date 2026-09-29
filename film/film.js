@@ -2,6 +2,13 @@
  * (dust, spark and trail, galaxy, caret), and two live DOM screens that take over from
  * the locked frames 138–149.
  *
+ * Site build, forked from lab/macro/film/film.js (scripts/sync-film.sh --merge-player
+ * 3-way merges later lab changes). Site differences: namespaced .film__ classes, URLs
+ * relative to data-base, the title as the first beat, a portrait set from
+ * frames/mobile/beats.json when the render ships one, the clean plate at the lock, frames
+ * fetched only after the page has loaded, Save-Data treated like reduced motion, and
+ * window.clakFilm.ownsKeys() so the page's other demo knows when to stand back.
+ *
  * Coordinates: frames/track.json and meta.json are in frame pixels (1600×900, origin
  * top-left). `view` is the cover fit that maps frame pixels to stage CSS pixels; the
  * frame canvas, the FX canvas and the screen homographies all go through it.
@@ -12,21 +19,23 @@
 (() => {
   'use strict';
 
-  const hero = document.getElementById('hero');
+  const hero = document.getElementById('film');
   if (!hero) return;
-  const stage = hero.querySelector('.stage');
-  const canvas = hero.querySelector('canvas.frames');
+  const BASE = hero.dataset.base || '';
+  const url = (p) => BASE + p;
+  const stage = hero.querySelector('.film__stage');
+  const canvas = hero.querySelector('canvas.film__frames');
   const ctx = canvas.getContext('2d', { alpha: false });
-  const fxCanvas = hero.querySelector('canvas.fx');
+  const fxCanvas = hero.querySelector('canvas.film__fx');
   const fx = fxCanvas.getContext('2d');
-  const lines = [...hero.querySelectorAll('.line')];
-  const loadingEl = hero.querySelector('.loading');
-  const pillEl = hero.querySelector('.screen--pill');
-  const phoneEl = hero.querySelector('.screen--phone');
-  const hudText = pillEl.querySelector('.hud__text');
-  const fieldText = phoneEl.querySelector('.field__text');
-  const tapInput = hero.querySelector('.tap-input input');
-  const announceEl = document.getElementById('announce');
+  const lines = [...hero.querySelectorAll('.film__line, .film__title, .film__cue')];
+  const loadingEl = hero.querySelector('.film__loading');
+  const pillEl = hero.querySelector('.film__screen--pill');
+  const phoneEl = hero.querySelector('.film__screen--phone');
+  const hudText = pillEl.querySelector('.film__hud');
+  const fieldText = phoneEl.querySelector('.film__fieldtext');
+  const tapInput = hero.querySelector('.film__tap input');
+  const announceEl = document.getElementById('filmAnnounce');
 
   const params = new URLSearchParams(location.search);
   const DEV = params.has('dev');                          // allows the synthetic track
@@ -53,6 +62,9 @@
   };
 
   let meta, set, N, track;
+  let NI = 0;                       // images in the active set (N story frames map onto them)
+  let spec = null, plate = null, plateFor = '';
+  let assets = null;                // film/assets.json from scripts/sync-film.sh: which optional files exist
   let format = 'avif';
   let generation = 0;
   let blobs = [];
@@ -68,7 +80,8 @@
   let tickPending = false;
   let view = { cw: 0, ch: 0, dpr: 1, s: 1, ox: 0, oy: 0 };
   let screensKey = '';
-  let staticMode = reduceMotion.matches;
+  const saveData = !!(navigator.connection && navigator.connection.saveData);
+  let staticMode = reduceMotion.matches || saveData || params.has('static');   // ?static previews it
 
   // ---------- math ----------
 
@@ -158,6 +171,40 @@
       width: 1600, height: 900, frames,
       screens: { macWindow: quad(300, 45, 755, 475), phone: quad(1150, 200, 205, 440), hudPill: quad(585, 143, 182, 47) },
     };
+  }
+
+  // Portrait set: mobile image m shows story frame story[m] (frames/mobile/beats.json). The
+  // player keeps working in story frames; only image lookups go through this inverse.
+  function imageAt(t) {
+    const st = set && set.story;
+    if (!st) return t;
+    if (t <= st[0]) return 0;
+    for (let m = 1; m < st.length; m++) {
+      if (t <= st[m]) return st[m] === st[m - 1] ? m : m - 1 + (t - st[m - 1]) / (st[m] - st[m - 1]);
+    }
+    return st.length - 1;
+  }
+
+  // The mobile track is per mobile image; resample it onto the story frames the FX code uses.
+  function resampleToStory(raw, n) {
+    const byI = [];
+    for (const e of raw.frames || []) if (e) byI[e.i] = e;
+    const mix = (A, B, u) => {
+      if (A == null || B == null) return u < 0.5 ? A ?? null : B ?? null;
+      if (Array.isArray(A)) return A.map((a, k) => (Array.isArray(a) ? a.map((c, q) => lerp(c, B[k][q], u)) : lerp(a, B[k], u)));
+      const o = {};
+      for (const k of Object.keys(A)) o[k] = typeof A[k] === 'number' && typeof B[k] === 'number' ? lerp(A[k], B[k], u) : A[k];
+      return o;
+    };
+    const frames = [];
+    for (let s = 0; s < n; s++) {
+      const m = imageAt(s), m0 = Math.floor(m), m1 = Math.min(set.story.length - 1, m0 + 1), u = m - m0;
+      const A = byI[m0] || {}, B = byI[m1] || {};
+      const e = { i: s };
+      for (const k of ['spark', 'galaxy', 'caret', 'hud', 'hudPill']) e[k] = mix(A[k], B[k], u);
+      frames.push(e);
+    }
+    return { width: raw.width, height: raw.height, screens: raw.screens, frames };
   }
 
   function buildTrack(raw) {
@@ -261,7 +308,7 @@
 
   const pad = (i) => String(i).padStart(3, '0');
   const fill = (path, fmt, i) => path.replaceAll('{format}', fmt).replace('{index}', pad(i));
-  const frameURL = (i, fmt = format) => fill(set.path, fmt, i);
+  const frameURL = (i, fmt = format) => url(fill(set.path, fmt, i));
   function loadOrder(n, step) {
     const seen = new Set(), order = [];
     const push = (i) => { if (i >= 0 && i < n && !seen.has(i)) { seen.add(i); order.push(i); } };
@@ -294,7 +341,7 @@
     if (gen !== generation) return;
     blobs[i] = blob;
     stats.bytes += blob.size;
-    if (i === 0 || i === N - 1 || Math.abs(i - target) <= AHEAD) enqueueDecode(i);
+    if (i === 0 || i === NI - 1 || Math.abs(i - target) <= AHEAD) enqueueDecode(i);
   }
 
   async function decodeBlob(blob) {
@@ -350,7 +397,7 @@
     while (bitmaps.size > capacity) {
       let worst = -1, dist = -1;
       for (const i of bitmaps.keys()) {
-        if (i === N - 1 || i === drawnIndex) continue;
+        if (i === NI - 1 || i === drawnIndex) continue;
         const d = Math.abs(i - target) * (Math.sign(i - target) === direction ? 1 : 2.5);
         if (d > dist) { dist = d; worst = i; }
       }
@@ -365,41 +412,95 @@
     decodeQueue = decodeQueue.filter((i) => Math.abs(i - target) <= AHEAD + BEHIND);
     const lo = direction > 0 ? target - BEHIND : target - AHEAD;
     const hi = direction > 0 ? target + AHEAD : target + BEHIND;
-    for (let i = Math.max(0, lo); i <= Math.min(N - 1, hi); i++) enqueueDecode(i);
+    for (let i = Math.max(0, lo); i <= Math.min(NI - 1, hi); i++) enqueueDecode(i);
   }
 
-  async function loadTrack() {
+  async function loadJSON(path) {
     try {
-      const res = await fetch('frames/track.json', { cache: 'no-store' });
+      const res = await fetch(url(path));
       return res.ok ? await res.json() : null;
     } catch (_) { return null; }
   }
+
+  // Clean plate: the locked frame with no baked text, shown once the live screens are fully on.
+  async function loadPlate(gen, key) {
+    if (plateFor === key || (assets && !(assets.plate && assets.plate[key]))) return;
+    plateFor = key;
+    const path = `frames/${key}/plate/${pad(NI - 1)}_clean.{format}`;
+    try {
+      const res = await fetch(url(path.replaceAll('{format}', format)));
+      if (!res.ok) return;
+      const bmp = await decodeBlob(await res.blob());
+      if (gen !== generation) { bmp.close?.(); return; }
+      plate = bmp; drawnKey = ''; requestTick();
+    } catch (_) { /* no plate: the last frame stays */ }
+  }
+
+  // Frame sizes and measured colours from the render; without it the CSS defaults stand.
+  function applySpec(key) {
+    if (!spec || !spec.hudPill || !spec.hudPill.texture) return;
+    const [w, h] = spec.hudPill.texture;
+    NATIVE.hudPill = [w, h];
+    pillEl.style.width = w + 'px'; pillEl.style.height = h + 'px';
+    const pt = spec.hudPill.ptPx || h / 46;
+    HUD_MAX = w - (spec.hudPill.textLeftPx || 29 * pt) - 16 * pt;
+    const c = spec[key] && spec[key].renderedColors;
+    if (!c) return;
+    const put = (name, v) => { if (v) hero.style.setProperty(name, v); else hero.style.removeProperty(name); };
+    put('--film-pill-bg', c.hudPill && c.hudPill.background);
+    put('--film-pill-text', c.hudPill && c.hudPill.text && c.hudPill.text.color);
+    put('--film-field-bg', c.phone && c.phone.fieldFill);
+    put('--film-field-text', c.phone && c.phone.text && c.phone.text.color);
+    put('--film-caret', c.phone && c.phone.caret && c.phone.caret.color);
+  }
+
+  // Frames wait for the page to finish loading and for the film to be on screen.
+  const pageLoaded = new Promise((r) => (document.readyState === 'complete' ? r() : addEventListener('load', r, { once: true })));
+  let onScreen;
+  const filmOnScreen = new Promise((r) => { onScreen = r; });
 
   async function start() {
     const gen = ++generation;
     for (const b of bitmaps.values()) b.close?.();
     bitmaps.clear(); decoding.clear(); decodeQueue = []; blobs = [];
+    plate?.close?.(); plate = null; plateFor = '';
     drawnIndex = -1; drawnKey = ''; screensKey = '';
     const key = portrait.matches ? 'mobile' : 'desktop';
-    set = meta.sets[key];
     N = meta.frames;
+    set = { ...meta.sets[key] };
+    let raw = null, imagesKey = 'desktop';
+    if (key === 'mobile' && (!assets || assets.mobile)) {
+      // A rendered portrait set replaces the desktop crop when it's there.
+      const [beats, tm] = await Promise.all([loadJSON('frames/mobile/beats.json'), loadJSON('frames/track_mobile.json')]);
+      if (beats && Array.isArray(beats.story) && tm && Array.isArray(tm.frames)) {
+        set = { width: tm.width, height: tm.height, path: 'frames/mobile/{format}/{index}.{format}', focus: [[0, 0.5, 0.5]], story: beats.story };
+        raw = resampleToStory(tm, N);
+        imagesKey = 'mobile';
+      }
+    }
+    if (!raw) raw = await loadJSON('frames/track.json');
+    NI = set.story ? set.story.length : N;
     capacity = Math.max(12, Math.floor(DECODED_BUDGET[key] / (set.width * set.height * 4)));
-    stats.set = key;
-    track = buildTrack(await loadTrack());
+    stats.set = imagesKey === key ? key : `${key} (desktop crop)`;
+    track = buildTrack(raw);
     stats.trackSource = track ? track.source : 'missing';
     if (track && track.source !== 'real') console.info('film: using the synthetic track (?dev)');
     if (gen !== generation) return;
+    applySpec(imagesKey);
     layout();
 
     const loadingTimer = setTimeout(() => { if (stats.firstFrameMs == null) loadingEl.hidden = false; }, LOADING_DELAY_MS);
-    const first = staticMode ? N - 1 : 0;
+    const first = staticMode ? NI - 1 : 0;
     target = lastTarget = first;
     if (!(await pickFormat(gen, first))) { console.error('no decodable frame format'); return; }
     stats.format = format;
     requestTick();
-    if (staticMode) { clearTimeout(loadingTimer); return; }
+    if (staticMode) { clearTimeout(loadingTimer); loadPlate(gen, imagesKey); return; }
 
-    const order = loadOrder(N, meta.keyframeStep).filter((i) => !blobs[i]);
+    await pageLoaded;
+    await filmOnScreen;
+    if (gen !== generation) return;
+    const order = loadOrder(NI, meta.keyframeStep).filter((i) => !blobs[i]);
     let next = 0;
     const worker = async () => {
       while (next < order.length && gen === generation) {
@@ -408,7 +509,7 @@
       }
     };
     await Promise.all(Array.from({ length: FETCH_CONCURRENCY }, worker));
-    if (gen === generation) stats.allFetchedMs = Math.round(performance.now());
+    if (gen === generation) { stats.allFetchedMs = Math.round(performance.now()); loadPlate(gen, imagesKey); }
     clearTimeout(loadingTimer);
   }
 
@@ -816,7 +917,7 @@
   // Text area inside the pill texture: from x = 29 pt to 16 pt short of the right edge (pt = 323/46).
   const PT = 323 / 46;
   const HUD_FONT = `${(24 * PT).toFixed(2)}px Menlo, "SF Mono", ui-monospace, monospace`;
-  const HUD_MAX = 1260 - 29 * PT - 16 * PT;
+  let HUD_MAX = 1260 - 29 * PT - 16 * PT;
   // Field text: 500 weight, 0.5 × the 126.45 px field height, room for the caret at the end.
   const FIELD_FONT = '500 63.23px Inter, sans-serif';
   const FIELD_MAX = 672 * 0.94 - 40.32 - 20;
@@ -891,9 +992,16 @@
   }
   const editable = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
+  // The film's live screens own the keyboard only once they're live and the stage covers the
+  // middle of the viewport; the page's other demo asks before it takes a key.
+  const ownsKeys = () => liveReady && inView();
+  window.clakFilm = { ownsKeys };
+
   addEventListener('keydown', (e) => {
     if (!liveReady || e.defaultPrevented || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
     if (editable(e.target) || !inView()) return;
+    // Space and Enter on a focused control belong to that control.
+    if (e.target.closest && e.target.closest('a, button, summary, [role="button"], #demo')) return;
     const k = e.key;
     if (!(k.length === 1 || k === 'Backspace')) return;
     // Space scrolls the page unless the visitor is in the middle of typing.
@@ -915,7 +1023,7 @@
 
   function nearestDecoded(t) {
     if (bitmaps.has(t)) return t;
-    for (let d = 1; d < N; d++) {
+    for (let d = 1; d < NI; d++) {
       const a = t - d * direction, b = t + d * direction;
       if (bitmaps.has(a)) return a;
       if (bitmaps.has(b)) return b;
@@ -939,27 +1047,30 @@
       pf = scrollProgress() / meta.filmEnd * 100;
       f = clamp(frameAt(pf), 0, N - 1);
     }
-    target = Math.round(f);
+    target = Math.round(imageAt(f));
     if (target !== lastTarget) { direction = target > lastTarget ? 1 : -1; lastTarget = target; refreshWindow(); }
     updateView();
 
-    const idx = nearestDecoded(target);
-    const key = `${idx}|${canvas.width}x${canvas.height}|${view.ox.toFixed(2)},${view.oy.toFixed(2)}`;
+    // Live screens crossfade in over the locked frames; once they're fully on, the clean plate
+    // (no baked text) replaces the last frame so nothing can ghost through the overlays.
+    const [l0, l1] = meta.lock;
+    const lockX = staticMode ? 1 : clamp((f - l0) / (l1 - l0), 0, 1);
+    const usePlate = !!plate && lockX >= 1;
+
+    const idx = usePlate ? NI - 1 : nearestDecoded(target);
+    const key = `${usePlate ? 'plate' : idx}|${canvas.width}x${canvas.height}|${view.ox.toFixed(2)},${view.oy.toFixed(2)}`;
     if (idx >= 0 && key !== drawnKey) {
       const { dpr, s, ox, oy } = view;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = '#0B0B0D';
       ctx.fillRect(0, 0, view.cw, view.ch);
-      ctx.drawImage(bitmaps.get(idx), ox, oy, set.width * s, set.height * s);
-      drawnIndex = idx; drawnKey = key; stats.drawnIndex = idx;
+      ctx.drawImage(usePlate ? plate : bitmaps.get(idx), ox, oy, set.width * s, set.height * s);
+      drawnIndex = idx; drawnKey = key; stats.drawnIndex = idx; stats.plate = usePlate;
       stats.draws++;
       if (idx !== target) stats.misses++;
-      if (stats.firstFrameMs == null) { stats.firstFrameMs = Math.round(performance.now()); loadingEl.hidden = true; }
+      if (stats.firstFrameMs == null) { stats.firstFrameMs = Math.round(performance.now()); loadingEl.hidden = true; hero.classList.add('is-drawn'); }
     }
 
-    // Live screens crossfade in over the locked frames.
-    const [l0, l1] = meta.lock;
-    const lockX = staticMode ? 1 : clamp((f - l0) / (l1 - l0), 0, 1);
     if (lockX > 0 && track) placeScreens();
     setScreens(lockX);
     liveReady = !!track && lockX >= 1 && pf >= 100;
@@ -973,6 +1084,7 @@
         const a = +el.dataset.in, b = +el.dataset.out;
         const o = (a <= 0 ? 1 : smooth(a, a + LINE_FADE, pf)) * (1 - smooth(b - LINE_FADE, b, pf));
         el.style.opacity = o.toFixed(3);
+        el.style.visibility = o > 0.005 ? '' : 'hidden';
         el.style.transform = `translate3d(0, ${((1 - o) * 10).toFixed(1)}px, 0)`;
       }
     }
@@ -985,20 +1097,10 @@
 
   // ---------- wiring ----------
 
-  function captureMode(which) {
-    // ?capture=pill|phone: the overlay alone at native size, to compare with the render's textures.
-    const el = which === 'pill' ? pillEl : phoneEl;
-    document.body.replaceChildren(el);
-    document.body.style.cssText = 'margin:0;background:#000';
-    el.style.cssText = 'position:relative;opacity:1;visibility:visible;transform:none;border-radius:0';
-    phoneEl.classList.remove('is-blinking');
-  }
-  if (params.get('capture')) { captureMode(params.get('capture')); return; }
-
   new IntersectionObserver(([e]) => {
     visible = e.isIntersecting;
-    phoneEl.querySelector('.caret').style.animationPlayState = visible ? 'running' : 'paused';
-    if (visible) requestTick();
+    phoneEl.querySelector('.film__caret').style.animationPlayState = visible ? 'running' : 'paused';
+    if (visible) { onScreen(); requestTick(); }
   }).observe(hero);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) requestTick(); });
   addEventListener('scroll', () => { if (visible) requestTick(); }, { passive: true });
@@ -1014,9 +1116,14 @@
     warm: makeSprite([[0, 'rgba(242,230,208,1)'], [0.35, 'rgba(242,230,208,0.5)'], [1, 'rgba(242,230,208,0)']]),
   };
 
-  fetch('meta.json')
+  fetch(url('meta.json'))
     .then((r) => r.json())
-    .then((m) => { meta = m; motes = makeMotes(m.dust.count); return start(); })
+    .then(async (m) => {
+      meta = m; motes = makeMotes(m.dust.count);
+      assets = await loadJSON('assets.json');
+      if (!assets || assets.overlaySpec) spec = await loadJSON('frames/overlay_spec.json');
+      return start();
+    })
     .catch((e) => console.error('hero failed to start', e));
 
   // ---------- measurement hooks ----------
@@ -1028,7 +1135,7 @@
     const t0 = performance.now();
     const check = () => {
       requestTick();
-      if ((drawnIndex === Math.round(frameAt(pct)) && !decoding.size) || performance.now() - t0 > 4000) requestAnimationFrame(() => requestAnimationFrame(() => resolve({ f, drawnIndex, pf })));
+      if ((drawnIndex === Math.round(imageAt(frameAt(pct))) && !decoding.size) || performance.now() - t0 > 4000) requestAnimationFrame(() => requestAnimationFrame(() => resolve({ f, drawnIndex, pf })));
       else setTimeout(check, 30);
     };
     check();

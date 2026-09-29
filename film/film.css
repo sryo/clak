@@ -1,49 +1,28 @@
-:root {
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --bg: #ffffff;
-  --text: #1d1d1f;
-  --text-2: #6e6e73;
-  --stage-bg: #0B0B0D;
-  --link: #3EA0FF;
-  --focus: #0A84FF;
+/* Clak "Macro" hero film, site build. Forked from lab/macro/film/film.css: every class is
+ * namespaced under .film so the page's own .stage, .hero, .caret and .hint rules can't reach
+ * in, and page tokens (--font, --gutter, .button, .sr-only) come from index.html. */
+
+.film {
   /* Film plus the live hold; meta.json filmEnd says where the film stops. */
-  --hero-length: 560svh;
+  --film-length: 560svh;
+  --film-void: #0B0B0D;
+  --film-text: #f5f5f7;
+  --film-text-2: rgba(245, 245, 247, 0.72);
+  --film-link: #3ea0ff;
+  --film-edge: max(var(--gutter, 24px), env(safe-area-inset-left));
+  position: relative;
+  /* Starts under the sticky site header, which turns to dark glass while it's over the film. */
+  margin-top: -48px;
+  height: var(--film-length);
+  background: var(--film-void);
+  color: var(--film-text);
+  color-scheme: dark;
 }
-@media (prefers-color-scheme: dark) {
-  :root { --bg: #111113; --text: #f5f5f7; --text-2: #a1a1a6; }
-}
+/* No script: one screen with the poster and the title. */
+html:not(.js) .film { height: auto; }
+html:not(.js) .film__stage { position: relative; }
 
-* { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font);
-  -webkit-font-smoothing: antialiased;
-}
-
-.intro, .after {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 18vh 16px;
-  text-align: center;
-}
-.intro h1, .after h2 {
-  font-family: var(--font-display);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  margin: 0 0 8px;
-}
-.intro h1 { font-size: clamp(40px, 8vw, 80px); }
-.after h2 { font-size: clamp(28px, 5vw, 48px); }
-.intro p, .after p { color: var(--text-2); margin: 0; font-size: 19px; }
-
-/* The film is a dark stage in both site themes. */
-.hero { position: relative; height: var(--hero-length); background: var(--stage-bg); color: #f5f5f7; }
-.stage {
+.film__stage {
   position: sticky;
   top: 0;
   height: 100vh;
@@ -52,11 +31,25 @@ body {
   contain: strict;
   width: 100%;
 }
-.frames, .fx { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+/* The last few pixels fade to the void, so the frame's floor light doesn't end in a hard cut
+ * where the page takes over. */
+.film__stage::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 56px; pointer-events: none;
+  background: linear-gradient(rgba(11, 11, 13, 0), var(--film-void));
+}
+.film__poster, .film__frames, .film__fx {
+  position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none;
+}
+.film__poster img { width: 100%; height: 100%; object-fit: cover; object-position: 36% 55%; display: block; }
+@media (min-aspect-ratio: 4/5) { .film__poster img { object-position: 50% 50%; } }
+/* The frame canvas is opaque black until its first draw; the poster shows until then. */
+.film__frames { opacity: 0; }
+.film.is-drawn .film__frames { opacity: 1; }
+.film.is-drawn .film__poster { visibility: hidden; }
 
 /* ---------- live screens (native size; film.js maps them onto the frame) ---------- */
 
-.screen {
+.film__screen {
   position: absolute;
   left: 0; top: 0;
   transform-origin: 0 0;
@@ -67,64 +60,70 @@ body {
   will-change: transform, opacity;
   -webkit-font-smoothing: antialiased;
 }
-.screen.is-on { visibility: visible; }
+.film__screen.is-on { visibility: visible; }
 
-/* HUD pill: 1260×323 = calib/film.js pillContent (46 pt tall, so 1 pt = 7.022 px). The dot and
+/* HUD pill: 1260×323 = calib/film.js pillContent (46 pt tall, so 1 pt = 7.022 px); film.js
+ * takes the width from frames/overlay_spec.json when the render publishes one. The dot and
  * the glass stay baked; this strip covers the text area with the rendered pill colour and
  * feathers into it. Text: 24 pt Menlo at x = 29 pt, centred +1 pt. */
-.screen--pill { width: 1260px; height: 323px; }
-.pill__strip {
+.film__screen--pill { width: 1260px; height: 323px; }
+.film__strip {
   position: absolute;
   left: 168.5px; right: 60px; top: 42px; bottom: 42px;
-  background: linear-gradient(90deg, rgb(24, 31, 45), rgb(21, 28, 41) 60%, rgb(22, 29, 42));
+  background: var(--film-pill-bg, linear-gradient(90deg, rgb(24, 31, 45), rgb(21, 28, 41) 60%, rgb(22, 29, 42)));
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 40px), transparent);
   mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 40px), transparent);
 }
-.hud__text {
+.film__hud {
   position: absolute;
   left: 35.1px;
   top: calc(50% + 7px);
   transform: translateY(-50%);
   font: 168.52px/1 Menlo, "SF Mono", ui-monospace, monospace;
-  color: #E9EAEE;                       /* #F5F5F7 after the render's grade */
+  color: var(--film-pill-text, #E9EAEE);   /* #F5F5F7 after the render's grade */
   white-space: pre;
 }
 
 /* Phone panel: 800×1686 = calib/film.js phoneContent. The panel and its gradient stay baked;
  * the text field (x 8%, y 40%, 84% × 7.5%, radius 30% of its height) is live. */
-.screen--phone { width: 800px; height: 1686px; }
-.field {
+.film__screen--phone { width: 800px; height: 1686px; }
+.film__field {
   position: absolute;
   left: 64px; top: 674.4px; width: 672px; height: 126.45px;
   display: flex; align-items: center;
   padding-left: 40.32px;
   border-radius: 37.94px;
-  background: rgb(24, 34, 46);
+  background: var(--film-field-bg, rgb(24, 34, 46));
   /* The texture's 3 px stroke survives the grade as only a faint edge. */
   box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.025);
   font: 500 63.23px/1 Inter, sans-serif;
-  color: #E9EAEE;
+  color: var(--film-field-text, #E9EAEE);
   white-space: pre;
   overflow: hidden;
 }
-.field__text { transform: translateY(1.9px); }
-.caret {
+.film__fieldtext { transform: translateY(1.9px); }
+.film__caret {
   flex: none;
   width: 5.6px; height: 66.39px;
   margin-left: 5.06px;
   border-radius: 2.8px;
-  background: #3EA0FF;
+  background: var(--film-caret, #3EA0FF);
 }
-.screen--phone.is-blinking .caret { animation: blink 1.1s steps(1) infinite; }
-.screen--phone.is-typing .caret { animation: none; }
-@keyframes blink { 50% { opacity: 0; } }
+.film__screen--phone.is-blinking .film__caret { animation: film-blink 1.1s steps(1) infinite; }
+.film__screen--phone.is-typing .film__caret { animation: none; }
+@keyframes film-blink { 50% { opacity: 0; } }
 
 /* ---------- copy ---------- */
 
-.copy { position: absolute; inset: 0; pointer-events: none; }
-.line {
+.film__copy { position: absolute; inset: 0; pointer-events: none; }
+/* Keeps the title and the lines legible over the bright key and the Mac window's edge. */
+.film__copy::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 38svh;
+  background: linear-gradient(rgba(11, 11, 13, 0), rgba(11, 11, 13, 0.55));
+}
+.film__line {
   position: absolute;
-  left: max(16px, env(safe-area-inset-left));
+  left: var(--film-edge);
   right: 16px;
   bottom: max(24px, 6svh);
   margin: 0;
@@ -135,35 +134,87 @@ body {
   line-height: 1.35;
   color: rgba(245, 245, 247, 0.8);
   text-shadow: 0 1px 12px rgba(0, 0, 0, 0.6);
-  opacity: 0;
   will-change: opacity, transform;
 }
-@media (max-aspect-ratio: 4/5) {
-  .line { bottom: auto; top: max(20px, 7svh); }
-  /* Portrait crops put the Mac window's bright edge under the copy; a scrim keeps it legible. */
-  .copy::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 22svh; background: linear-gradient(rgba(11, 11, 13, 0.75), rgba(11, 11, 13, 0)); }
+.js .film__line { opacity: 0; }
+
+/* The title is the first beat: fully there at the top of the page, gone once the key drops. */
+.film__title {
+  position: absolute;
+  left: var(--film-edge);
+  right: 16px;
+  bottom: max(24px, 6svh);
+  pointer-events: auto;
+  text-shadow: 0 1px 18px rgba(0, 0, 0, 0.55);
+}
+.film__title h1 {
+  font-family: var(--font-display);
+  font-size: clamp(56px, 7.5vw, 104px);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
+  color: var(--film-text);
+}
+.film__tagline {
+  margin-top: 12px;
+  max-width: 17em;
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.4vw, 32px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--film-text);
+}
+.film__cta {
+  margin-top: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  text-shadow: none;
+}
+.film__cta .text-link { color: var(--film-link); }
+.film__cue {
+  position: absolute;
+  right: var(--film-edge);
+  bottom: max(24px, 6svh);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--film-text-2);
+}
+.film__cue::after {
+  content: ""; display: block; width: 1px; height: 28px; margin: 8px auto 0;
+  background: linear-gradient(currentColor, transparent);
 }
 
-.tap-input { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
-.tap-input input { font-size: 16px; }
-.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-aspect-ratio: 4/5) {
+  .film__line { bottom: auto; top: calc(48px + max(12px, 4svh)); }
+  /* Portrait crops put the Mac window's bright edge under the copy; a scrim keeps it legible. */
+  .film__copy::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 26svh; background: linear-gradient(rgba(11, 11, 13, 0.75), rgba(11, 11, 13, 0)); }
+  .film__cue { display: none; }
+}
 
-.loading {
+.film__tap { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.film__tap input { font-size: 16px; }
+
+.film__loading {
   position: absolute; left: 50%; bottom: 32px; transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px;
   color: #a1a1a6; font-size: 14px;
 }
-.loading span {
+.film__loading span {
   width: 14px; height: 14px; border-radius: 50%;
   border: 2px solid currentColor; border-right-color: transparent;
-  animation: spin 0.8s linear infinite;
+  animation: film-spin 0.8s linear infinite;
 }
-.loading[hidden] { display: none; }
-@keyframes spin { to { transform: rotate(360deg); } }
+.film__loading[hidden] { display: none; }
+@keyframes film-spin { to { transform: rotate(360deg); } }
 
-/* Reduced motion: no pinning, one screen, the locked frame with live screens, copy stacked. */
-.hero.is-static { height: auto; }
-.hero.is-static .stage { position: relative; height: 100vh; height: 100svh; }
-.hero.is-static .copy { display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; padding: 0 16px max(24px, 6svh); }
-.hero.is-static .line { position: static; opacity: 1; }
-.hero.is-static .caret { animation: none !important; }
+/* Reduced motion (or Save-Data): no pinning, one screen, the locked frame with live screens.
+ * The title sits where it always does; of the scroll copy only the invitation stays. */
+.film.is-static { height: auto; }
+.film.is-static .film__stage { position: relative; }
+.film.is-static .film__line { display: none; }
+.film.is-static .film__line--live { display: block; opacity: 1; bottom: auto; top: calc(48px + max(16px, 4svh)); }
+.film.is-static .film__cue { display: none; }
+.film.is-static .film__caret { animation: none !important; }
