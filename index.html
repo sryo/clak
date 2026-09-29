@@ -252,7 +252,7 @@
        The receiving surface is the hero; the sending one is small, in front.
        Both are laid out at a fixed native size and placed with one translate + scale,
        so the mode swap is a single transform transition. The stage speaks the film's
-       language in both page themes: the void, a blue ambient glow, glass panels floating
+       language in both page themes: the void and flat dark panels floating
        in it, and no device hardware except a generic keyboard. */
     .sr-only {
       position: absolute;
@@ -272,7 +272,7 @@
       --text: #f5f5f7;
       --text-2: rgba(245, 245, 247, 0.62);
       --hairline: rgba(255, 255, 255, 0.1);
-      --edge: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+      --edge: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
       position: relative;
       overflow: clip;
       color-scheme: dark;
@@ -372,7 +372,7 @@
     .slab {
       border-radius: 24px;
       background: #0f1219;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.5), 0 24px 60px rgba(0, 0, 0, 0.6);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 24px 60px rgba(0, 0, 0, 0.5);
     }
 
     /* The Mac side, in native pixels. */
@@ -380,10 +380,7 @@
     .wall {
       position: absolute;
       overflow: hidden;
-      background:
-        radial-gradient(85% 75% at 15% 110%, rgba(27, 95, 214, 0.5) 0%, rgba(27, 95, 214, 0) 62%),
-        radial-gradient(60% 55% at 96% -8%, rgba(44, 69, 136, 0.5) 0%, rgba(44, 69, 136, 0) 62%),
-        linear-gradient(160deg, #121a2b 0%, #0d1528 55%, #0b1a3d 100%);
+      background: #111a2c;
     }
 
     /* Type mode: a window panel strip holding the HUD, and the keyboard in front of it. */
@@ -408,8 +405,8 @@
       gap: 18px;
       padding: 14px 30px;
       border-radius: 20px;
-      background: linear-gradient(180deg, #1d2536 0%, #171d2b 100%);
-      box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.2), inset 0 0 0 1.5px rgba(255, 255, 255, 0.12), 0 14px 44px rgba(0, 0, 0, 0.5);
+      background: #171d2b;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
     }
     .hud__dot { position: relative; flex: none; width: 16px; height: 16px; border-radius: 50%; background: #ff9f0a; transition: background-color 250ms ease; }
     .hud__dot::after {
@@ -458,7 +455,7 @@
       gap: 5px;
       padding: 13px 15px 14px;
       border-radius: 20px;
-      background: linear-gradient(180deg, #1a1e26 0%, #111318 100%);
+      background: #16191f;
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 22px 50px rgba(0, 0, 0, 0.55);
     }
     .krow { display: flex; gap: 5px; flex: 1 1 0; min-height: 0; }
@@ -469,17 +466,17 @@
       display: grid;
       place-items: center;
       border-radius: 6px;
-      background: linear-gradient(180deg, #2a2e37 0%, #22252d 100%);
+      background: #262a32;
       color: rgba(228, 233, 242, 0.8);
       font: 500 13px/1 var(--font);
-      box-shadow: inset 0 -1.5px 0 rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.5);
       transition: background-color 280ms ease, color 280ms ease, box-shadow 280ms ease;
     }
     .krow--fn .k { font-size: 10px; }
     .k.is-lit {
       background: #3492ec;
       color: #fff;
-      box-shadow: 0 0 8px rgba(52, 146, 236, 0.55);
+      box-shadow: none;
       transition: none;
     }
     .k--arrows { display: flex; flex-direction: column; gap: 3px; background: none; box-shadow: none; }
@@ -498,7 +495,6 @@
       height: 250px;
       border-radius: 16px;
       background: #141a27;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 18px 44px rgba(0, 0, 0, 0.45);
       overflow: hidden;
       transition: transform 420ms cubic-bezier(0.32, 0.72, 0, 1), left 420ms cubic-bezier(0.32, 0.72, 0, 1),
         top 420ms cubic-bezier(0.32, 0.72, 0, 1), width 420ms cubic-bezier(0.32, 0.72, 0, 1), height 420ms cubic-bezier(0.32, 0.72, 0, 1),
@@ -531,12 +527,11 @@
       position: relative;
       border-radius: 16px;
       background: var(--tile);
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 10px 26px rgba(0, 0, 0, 0.4);
     }
     .tile::before, .tile::after { content: ""; position: absolute; left: 14px; border-radius: 4px; }
     .tile::before { top: 14px; width: 18px; height: 18px; border-radius: 50%; background: rgba(255, 255, 255, 0.9); }
     .tile::after { bottom: 16px; width: 46px; height: 6px; background: rgba(255, 255, 255, 0.6); }
-    .tile.is-active { box-shadow: inset 0 0 0 2px #fff, 0 4px 12px rgba(10, 132, 255, 0.35); }
+    .tile.is-active { box-shadow: inset 0 0 0 2px #fff; }
     .tile.is-bouncing { animation: tile-bounce 0.9s cubic-bezier(0.3, 0, 0.3, 1); }
     @keyframes tile-bounce {
       25% { transform: translateY(-20px); }
@@ -570,7 +565,7 @@
       padding: 0 16px;
       border-radius: 21px;
       background: #161c2a;
-      box-shadow: var(--edge), 0 10px 30px rgba(0, 0, 0, 0.45);
+      box-shadow: var(--edge);
       color: #f0f1f3;
       opacity: 0;
       transform: translateY(-6px);
@@ -595,7 +590,7 @@
       padding: 0 20px;
       border-radius: 16px;
       background: #19222e;
-      box-shadow: var(--edge), 0 20px 50px rgba(0, 0, 0, 0.55);
+      box-shadow: var(--edge);
       color: rgba(240, 241, 243, 0.55);
       font: 20px/1 var(--font);
       opacity: 0;
@@ -651,7 +646,7 @@
       height: 480px;
       border-radius: 30px;
       overflow: hidden;
-      background: linear-gradient(180deg, #131a2c 0%, #0d1121 100%);
+      background: #10151f;
       color: #fff;
       font-family: var(--font);
     }
@@ -667,7 +662,6 @@
       padding: 8px 12px;
       border-radius: 11px;
       background: #19222e;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
       overflow: hidden;
     }
     .field__text {
@@ -705,7 +699,7 @@
       padding: 0 12px 0 10px;
       border-radius: 13px;
       background: #1b2333;
-      box-shadow: var(--edge), 0 8px 20px rgba(0, 0, 0, 0.45);
+      box-shadow: var(--edge);
       color: #f0f1f3;
       opacity: 0;
       transform: translateY(-4px);
@@ -718,11 +712,8 @@
 
     /* Clak Remote, connected: an empty glass pad and one glass control bar. */
     .face--remote { display: flex; flex-direction: column; gap: 6px; padding: 10px 9px 10px; }
-    /* Clak Remote's own glass, kept clear: a light edge over the panel, not a frosted fill. */
-    .glass {
-      background: rgba(255, 255, 255, 0.07);
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.28);
-    }
+    /* Clak Remote's surfaces, flat: a lighter fill, no rim or highlight. */
+    .glass { background: rgba(255, 255, 255, 0.06); }
     .pad {
       position: relative;
       flex: 1;
@@ -1365,9 +1356,9 @@
 
     // Plain tiles stand in for things to click; TARGET is the one the loop drives to.
     const TILES = [
-      'linear-gradient(160deg,#3ea0ff,#0a6fe0)', 'linear-gradient(160deg,#343c4d,#232834)',
-      'linear-gradient(160deg,#20b3c9,#0d7f96)', 'linear-gradient(160deg,#6d6af0,#4340c4)',
-      'linear-gradient(160deg,#3b4457,#262c39)', 'linear-gradient(160deg,#34c77b,#1a9656)',
+      '#0a84ff', '#2c3240',
+      '#1497ad', '#5856d6',
+      '#343a48', '#28a765',
     ];
     const TARGET = 3;
     TILES.forEach((bg) => tiles.insertAdjacentHTML('beforeend', `<span class="tile" style="--tile:${bg}"></span>`));
