@@ -1,0 +1,283 @@
+{
+ "note": "Texture layouts are in the content-texture pixel space that each quad in track.screens maps to (TL,TR,BR,BL = texture (0,0),(w,0),(w,h),(0,h)). Rendered colours are measured from the graded plates (ref minus clean), i.e. what the page shows. Grade: out = sqrt(in^2 + #0B0B0D^2) per sRGB channel.",
+ "hudPill": {
+  "texture": [
+   2178,
+   323
+  ],
+  "ptPx": 7.0217,
+  "font": "Menlo (fallbacks \"SF Mono\", ui-monospace, monospace), regular 400",
+  "fontSizePx": 168.52,
+  "fontSizePt": 24,
+  "textColor": "#F5F5F7",
+  "textLeftPx": 203.63,
+  "textMiddleYPx": 168.52,
+  "textBaseline": "middle",
+  "charAdvancePx": 101.46,
+  "maxCharsFromLeft": 18,
+  "dot": {
+   "cx": 119.37,
+   "cy": 161.5,
+   "r": 28.09,
+   "color": "#30D158"
+  },
+  "background": "linear-gradient(#2A2D35 \u2192 #1A1C21), top to bottom",
+  "contentSizeCm": [
+   19.96,
+   2.96
+  ]
+ },
+ "phone": {
+  "texture": [
+   800,
+   1686
+  ],
+  "field": {
+   "x": 64,
+   "y": 674.4,
+   "w": 672,
+   "h": 126.45,
+   "radius": 37.93,
+   "fill": "#1F2127",
+   "stroke": "rgba(255,255,255,0.12) 3px"
+  },
+  "font": "Inter 500",
+  "fontSizePx": 63.22,
+  "textColor": "#F5F5F7",
+  "textLeftPx": 104.32,
+  "textMiddleYPx": 739.52,
+  "textBaseline": "middle",
+  "caret": {
+   "color": "#3EA0FF",
+   "widthPx": 5.6,
+   "heightPx": 66.39,
+   "gapAfterTextPx": 5.06,
+   "radiusPx": 2.8
+  },
+  "background": "linear-gradient(#15171C \u2192 #0D0E11), top to bottom",
+  "contentSizeCm": [
+   6.96,
+   15.16
+  ]
+ },
+ "desktop": {
+  "frame": 149,
+  "size": [
+   1600,
+   900
+  ],
+  "quads": {
+   "macWindow": [
+    [
+     294.3,
+     44.9
+    ],
+    [
+     1055.3,
+     44.3
+    ],
+    [
+     1052,
+     513.4
+    ],
+    [
+     307.3,
+     522
+    ]
+   ],
+   "phone": [
+    [
+     1161.8,
+     197.7
+    ],
+    [
+     1369.3,
+     203.6
+    ],
+    [
+     1344.8,
+     650
+    ],
+    [
+     1142.9,
+     631.3
+    ]
+   ],
+   "hudPill": [
+    [
+     518.7,
+     143.7
+    ],
+    [
+     833.3,
+     142.7
+    ],
+    [
+     833.5,
+     189.5
+    ],
+    [
+     519.5,
+     190.8
+    ]
+   ],
+   "radius": {
+    "macWindow": 0.023,
+    "phone": 0.1336,
+    "hudPill": 0.0276
+   }
+  },
+  "renderedColors": {
+   "hudPill": {
+    "text": {
+     "color": "#E1E2E2",
+     "peak": "#EFEFEF",
+     "pixels": 80,
+     "frameBox": [
+      548,
+      152,
+      565,
+      184
+     ]
+    },
+    "background": "#171D2B"
+   },
+   "phone": {
+    "text": {
+     "color": "#DCDBDE",
+     "peak": "#F0EEEF",
+     "pixels": 61,
+     "frameBox": [
+      1178,
+      381,
+      1193,
+      403
+     ]
+    },
+    "caret": {
+     "color": "#3492EC",
+     "peak": "#3D96F0",
+     "pixels": 10,
+     "frameBox": [
+      1188,
+      380,
+      1201,
+      405
+     ]
+    },
+    "fieldFill": "#19222E",
+    "screenBackground": "#101423"
+   }
+  }
+ },
+ "mobile": {
+  "frame": 95,
+  "size": [
+   750,
+   1334
+  ],
+  "quads": {
+   "macWindow": [
+    [
+     48.7,
+     178.6
+    ],
+    [
+     701.3,
+     178.6
+    ],
+    [
+     693,
+     587.3
+    ],
+    [
+     57,
+     587.3
+    ]
+   ],
+   "phone": [
+    [
+     281.9,
+     754.4
+    ],
+    [
+     468.1,
+     754.4
+    ],
+    [
+     466,
+     1147
+    ],
+    [
+     284,
+     1147
+    ]
+   ],
+   "hudPill": [
+    [
+     240.1,
+     261.1
+    ],
+    [
+     509.9,
+     261.1
+    ],
+    [
+     509.5,
+     301.8
+    ],
+    [
+     240.5,
+     301.8
+    ]
+   ],
+   "radius": {
+    "macWindow": 0.023,
+    "phone": 0.1336,
+    "hudPill": 0.0276
+   }
+  },
+  "renderedColors": {
+   "hudPill": {
+    "text": {
+     "color": "#E6E6E6",
+     "peak": "#EEEFEF",
+     "pixels": 58,
+     "frameBox": [
+      265,
+      268,
+      280,
+      296
+     ]
+    },
+    "background": "#131926"
+   },
+   "phone": {
+    "text": {
+     "color": "#D7D6D6",
+     "peak": "#F0EEEF",
+     "pixels": 52,
+     "frameBox": [
+      306,
+      919,
+      319,
+      939
+     ]
+    },
+    "caret": {
+     "color": "#2E8AED",
+     "peak": "#338EEE",
+     "pixels": 13,
+     "frameBox": [
+      315,
+      918,
+      326,
+      940
+     ]
+    },
+    "fieldFill": "#121B27",
+    "screenBackground": "#0C0E1C"
+   }
+  }
+ }
+}
